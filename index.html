@@ -9,7 +9,6 @@
   <meta name="apple-mobile-web-app-title" content="ApexPPM" />
   <title>ApexPPM — Multi-User Cloud Portfolio Manager</title>
 
-  <!-- Embedded PWA Manifest & Custom Icon -->
   <script>
     (function() {
       const svgIcon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
@@ -59,15 +58,12 @@
   <script type="text/babel">
     const { useState, useEffect, useMemo, useRef } = React;
 
-    // OPTIONAL: Paste your restored Supabase URL & Anon Key here before deploying to Cloudflare Pages
-    // so external users never have to configure anything—they just Sign Up / Sign In!
+    // Hardcoded Supabase Credentials
     const DEFAULT_SUPABASE_URL = "https://tzqbzzdctwdyvwvyvwzk.supabase.co";
-    const DEFAULT_SUPABASE_ANON_KEY = "sb_publishable_Jve6BGkRJUrhkX8vMlDJUA_m_4RoWpT";
+    const DEFAULT_SUPABASE_ANON_KEY = "sb_publishable_Jve6BGKRJurhkX8vMlDJUA_m_4RoWpT";
 
     const TODAY_ISO = new Date().toISOString().slice(0, 10);
-    const STORAGE_KEY = "apexpms_supabase_cache_v4";
-    const SB_URL_KEY = "apexpms_sb_url";
-    const SB_ANON_KEY = "apexpms_sb_anon";
+    const STORAGE_KEY = "apexpms_supabase_secure_v5";
 
     const parseISO = (str) => {
       if (!str) return new Date(TODAY_ISO + "T00:00:00");
@@ -99,75 +95,40 @@
       return parseISO(isoStr).toLocaleDateString("en-US", { month: "short", day: "numeric" });
     };
 
-    const DEFAULT_STATE = {
-      programs: [
-        { id: "pgm-1", code: "PGM-01", name: "AI Registry Hub", manager: "Mustafa Nisar", budget: 250000 }
-      ],
-      projects: [
-        { id: "prj-1", programId: "pgm-1", code: "PRJ-01", name: "Frontend Development", methodology: "Hybrid (CPM + Agile)", baselineStart: TODAY_ISO }
-      ],
-      tasks: [
-        {
-          id: "tsk-1",
-          projectId: "prj-1",
-          wbs: "1.1",
-          name: "Pilot Proposal",
-          startDate: TODAY_ISO,
-          endDate: addDaysISO(TODAY_ISO, 15),
-          duration: 15,
-          predecessorId: "",
-          depType: "FS",
-          lag: 0,
-          status: "In Progress",
-          done: false,
-          owner: "Mustafa",
-          pv: 12000,
-          ac: 10500,
-          percentComplete: 40
-        }
-      ],
-      risks: [
-        { id: "rsk-1", projectId: "prj-1", title: "External schema drift across providers", probability: 3, impact: 4, mitigation: "Automated JSON validation & staging buffer", status: "Open" }
-      ],
-      procurements: [
-        { id: "po-1", projectId: "prj-1", vendor: "Cloud Edge Infrastructure", contractType: "Fixed Price (FFP)", amount: 4800, wbsRef: "1.1" }
-      ]
+    // Clean blank state for new users (no demo data leaked to public visitors)
+    const EMPTY_WORKSPACE = {
+      programs: [{ id: "pgm-1", code: "PGM-01", name: "My First Program", manager: "Owner", budget: 100000 }],
+      projects: [{ id: "prj-1", programId: "pgm-1", code: "PRJ-01", name: "Initial Project", methodology: "Hybrid", baselineStart: TODAY_ISO }],
+      tasks: [],
+      risks: [],
+      procurements: []
     };
 
     function App() {
-      // Supabase Credentials & Client
-      const [sbUrl, setSbUrl] = useState(() => DEFAULT_SUPABASE_URL || localStorage.getItem(SB_URL_KEY) || "");
-      const [sbAnon, setSbAnon] = useState(() => DEFAULT_SUPABASE_ANON_KEY || localStorage.getItem(SB_ANON_KEY) || "");
       const [user, setUser] = useState(null);
       const [authEmail, setAuthEmail] = useState("");
       const [authPassword, setAuthPassword] = useState("");
       const [authMessage, setAuthMessage] = useState("");
       const [showAuthModal, setShowAuthModal] = useState(false);
+      const [isAuthLoading, setIsAuthLoading] = useState(true);
 
-      const [syncStatus, setSyncStatus] = useState("Local Mode");
+      const [syncStatus, setSyncStatus] = useState("Authenticating...");
       const [lastSyncedAt, setLastSyncedAt] = useState(null);
       const isPullingRef = useRef(false);
 
       const supabase = useMemo(() => {
-        if (!sbUrl || !sbAnon || !window.supabase) return null;
+        if (!DEFAULT_SUPABASE_URL || !DEFAULT_SUPABASE_ANON_KEY || !window.supabase) return null;
         try {
-          return window.supabase.createClient(sbUrl, sbAnon);
+          return window.supabase.createClient(DEFAULT_SUPABASE_URL, DEFAULT_SUPABASE_ANON_KEY);
         } catch (e) {
-          console.error("Invalid Supabase config:", e);
           return null;
         }
-      }, [sbUrl, sbAnon]);
+      }, []);
 
-      const [data, setData] = useState(() => {
-        try {
-          const saved = localStorage.getItem(STORAGE_KEY);
-          if (saved) return JSON.parse(saved);
-        } catch (e) {}
-        return DEFAULT_STATE;
-      });
+      const [data, setData] = useState(EMPTY_WORKSPACE);
 
-      const [selectedProgramId, setSelectedProgramId] = useState(() => data.programs[0]?.id || "ALL");
-      const [selectedProjectId, setSelectedProjectId] = useState(() => data.projects[0]?.id || "ALL");
+      const [selectedProgramId, setSelectedProgramId] = useState("ALL");
+      const [selectedProjectId, setSelectedProjectId] = useState("ALL");
       const [activeTab, setActiveTab] = useState("gantt");
       const [showNewModal, setShowNewModal] = useState(false);
 
@@ -185,23 +146,28 @@
       const [newCode, setNewCode] = useState("");
       const [newName, setNewName] = useState("");
 
-      // Listen for Supabase Auth session
+      // Check active auth session on mount
       useEffect(() => {
-        if (!supabase) return;
+        if (!supabase) {
+          setIsAuthLoading(false);
+          return;
+        }
         supabase.auth.getSession().then(({ data: { session } }) => {
           setUser(session?.user ?? null);
+          setIsAuthLoading(false);
         });
         const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
           setUser(session?.user ?? null);
+          setIsAuthLoading(false);
         });
         return () => subscription.unsubscribe();
       }, [supabase]);
 
-      // Load user's isolated workspace from Supabase
-      const pullWorkspaceFromSupabase = async (activeUser = user) => {
+      // Pull isolated workspace from Supabase for signed-in user
+      const pullWorkspaceFromSupabase = async (activeUser) => {
         if (!supabase || !activeUser) return;
         try {
-          setSyncStatus("Syncing...");
+          setSyncStatus("Syncing Cloud...");
           const { data: row, error } = await supabase
             .from("workspaces")
             .select("state, updated_at")
@@ -213,22 +179,19 @@
           if (row && row.state && row.state.programs) {
             isPullingRef.current = true;
             setData(row.state);
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(row.state));
             setLastSyncedAt(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
-            setSyncStatus("Supabase Synced");
+            setSyncStatus("Cloud Synced");
             setTimeout(() => { isPullingRef.current = false; }, 300);
           } else {
-            // First login for this user -> initialize their cloud row with current local data
-            await pushWorkspaceToSupabase(data, activeUser);
+            await pushWorkspaceToSupabase(EMPTY_WORKSPACE, activeUser);
+            setData(EMPTY_WORKSPACE);
           }
         } catch (err) {
-          console.error("Supabase pull error:", err);
-          setSyncStatus("Offline (Cached)");
+          setSyncStatus("Offline");
         }
       };
 
-      // Upsert user's workspace into Supabase
-      const pushWorkspaceToSupabase = async (stateToSave, activeUser = user) => {
+      const pushWorkspaceToSupabase = async (stateToSave, activeUser) => {
         if (!supabase || !activeUser) return;
         try {
           setSyncStatus("Saving...");
@@ -242,51 +205,42 @@
             });
           if (error) throw error;
           setLastSyncedAt(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
-          setSyncStatus("Supabase Synced");
+          setSyncStatus("Cloud Synced");
         } catch (err) {
-          console.error("Supabase push error:", err);
-          setSyncStatus("Offline (Cached)");
+          setSyncStatus("Offline");
         }
       };
 
       useEffect(() => {
-        if (user && supabase) {
+        if (user) {
           pullWorkspaceFromSupabase(user);
-          const onFocus = () => pullWorkspaceFromSupabase(user);
-          window.addEventListener("focus", onFocus);
-          return () => window.removeEventListener("focus", onFocus);
         }
-      }, [user, supabase]);
+      }, [user]);
 
       useEffect(() => {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-        if (!user || !supabase || isPullingRef.current) return;
+        if (!user || isPullingRef.current) return;
         const timer = setTimeout(() => {
           pushWorkspaceToSupabase(data, user);
         }, 500);
         return () => clearTimeout(timer);
-      }, [data, user, supabase]);
+      }, [data, user]);
 
-      // Auth Handlers
       const handleSignInOrSignUp = async (mode) => {
-        if (!supabase) {
-          setAuthMessage("Please enter your Supabase Project URL and Anon Key first.");
-          return;
-        }
+        if (!supabase) return;
         setAuthMessage("Processing...");
         try {
           if (mode === "magic") {
             const { error } = await supabase.auth.signInWithOtp({ email: authEmail });
             if (error) throw error;
-            setAuthMessage("Check your email for the login link!");
+            setAuthMessage("Check your email for the magic link!");
           } else if (mode === "signup") {
             const { error } = await supabase.auth.signUp({ email: authEmail, password: authPassword });
             if (error) throw error;
-            setAuthMessage("Account created! Signed in or check email confirmation.");
+            setAuthMessage("Account created! Check your email to confirm.");
           } else {
             const { error } = await supabase.auth.signInWithPassword({ email: authEmail, password: authPassword });
             if (error) throw error;
-            setAuthMessage("Signed in!");
+            setAuthMessage("Signed in successfully!");
             setShowAuthModal(false);
           }
         } catch (err) {
@@ -466,9 +420,80 @@
         setShowNewModal(false);
       };
 
+      if (isAuthLoading) {
+        return (
+          <div className="min-h-screen bg-[#0b0f19] flex items-center justify-center text-slate-400 text-sm">
+            Loading ApexPPM...
+          </div>
+        );
+      }
+
+      // AUTH GATE: If user is not signed in, show professional landing/sign-in page
+      if (!user) {
+        return (
+          <div className="min-h-screen bg-[#0b0f19] text-slate-100 flex flex-col items-center justify-center p-6">
+            <div className="max-w-md w-full bg-[#111827] border border-slate-800 rounded-2xl p-8 shadow-2xl space-y-6">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-xl bg-indigo-600 flex items-center justify-center font-bold text-xl shadow-lg shadow-indigo-600/30">
+                  A
+                </div>
+                <div>
+                  <h1 className="text-xl font-bold tracking-tight">ApexPPM</h1>
+                  <p className="text-xs text-slate-400">Enterprise Portfolio, Program & Project Management</p>
+                </div>
+              </div>
+
+              <div className="space-y-3 text-sm text-slate-300">
+                <p>Welcome! ApexPPM provides PMI-aligned Critical Path Method (CPM) scheduling, SVG dependency mapping, and Earned Value Management (EVM) for teams.</p>
+                <p className="text-xs text-slate-400">Sign in or create an account to access your private multi-tenant workspace securely stored in Supabase.</p>
+              </div>
+
+              <div className="space-y-3 pt-2">
+                <input
+                  type="email"
+                  value={authEmail}
+                  onChange={(e) => setAuthEmail(e.target.value)}
+                  placeholder="name@airegistryhub.com"
+                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 focus:outline-none focus:border-indigo-500"
+                />
+                <input
+                  type="password"
+                  value={authPassword}
+                  onChange={(e) => setAuthPassword(e.target.value)}
+                  placeholder="Password (or leave blank for Magic Link)"
+                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 focus:outline-none focus:border-indigo-500"
+                />
+                {authMessage && <div className="text-xs font-medium text-indigo-400">{authMessage}</div>}
+
+                <div className="grid grid-cols-3 gap-2 pt-2">
+                  <button
+                    onClick={() => handleSignInOrSignUp("login")}
+                    className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold py-3 rounded-xl transition shadow-lg shadow-indigo-600/20"
+                  >
+                    Sign In
+                  </button>
+                  <button
+                    onClick={() => handleSignInOrSignUp("signup")}
+                    className="bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold py-3 rounded-xl transition border border-slate-700"
+                  >
+                    Sign Up
+                  </button>
+                  <button
+                    onClick={() => handleSignInOrSignUp("magic")}
+                    className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold py-3 rounded-xl transition shadow-lg shadow-emerald-600/20"
+                  >
+                    Magic Link
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      // MAIN APP WORKSPACE (Only visible when signed in)
       return (
         <div className="min-h-screen flex flex-col bg-[#0b0f19] text-slate-100 pb-16 md:pb-0">
-          {/* Header */}
           <header className="border-b border-slate-800 bg-[#111827]/95 backdrop-blur px-4 md:px-6 py-3 flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-3">
               <div className="w-9 h-9 rounded-xl bg-indigo-600 flex items-center justify-center font-bold text-base shadow-lg shadow-indigo-600/30">
@@ -477,16 +502,9 @@
               <div>
                 <div className="flex items-center gap-2">
                   <h1 className="text-base md:text-lg font-bold tracking-tight">ApexPPM</h1>
-                  <button
-                    onClick={() => setShowAuthModal(true)}
-                    className={`text-[11px] px-2.5 py-0.5 rounded-full border transition ${
-                      user
-                        ? "bg-emerald-500/15 text-emerald-300 border-emerald-500/30"
-                        : "bg-amber-500/15 text-amber-300 border-amber-500/30"
-                    }`}
-                  >
-                    ● {user ? `${syncStatus} (${user.email})` : "Sign In / Connect Supabase"}
-                  </button>
+                  <span className="text-[11px] px-2.5 py-0.5 rounded-full border bg-emerald-500/15 text-emerald-300 border-emerald-500/30">
+                    ● {syncStatus} ({user.email})
+                  </span>
                 </div>
                 <div className="text-[11px] text-slate-400">
                   Multi-Tenant Cloud PWA • Today: {formatShortDate(TODAY_ISO)}
@@ -525,16 +543,15 @@
               </button>
 
               <button
-                onClick={() => setShowAuthModal(true)}
-                className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs md:text-sm font-medium px-3 py-1.5 rounded-lg"
+                onClick={async () => { await supabase.auth.signOut(); setUser(null); }}
+                className="bg-rose-600/20 hover:bg-rose-600/30 border border-rose-500/40 text-rose-300 text-xs md:text-sm font-medium px-3 py-1.5 rounded-lg"
               >
-                {user ? "Account & Cloud" : "Sign In"}
+                Sign Out
               </button>
             </div>
           </header>
 
           <div className="flex-1 flex overflow-hidden">
-            {/* Desktop Sidebar */}
             <aside className="hidden md:flex w-60 border-r border-slate-800 bg-[#0f1624] p-4 flex-col justify-between shrink-0">
               <div className="space-y-1.5">
                 {[
@@ -555,19 +572,15 @@
                   </button>
                 ))}
               </div>
-              {user && (
-                <button
-                  onClick={() => pullWorkspaceFromSupabase(user)}
-                  className="w-full py-2 px-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-slate-300"
-                >
-                  ↻ Sync from Supabase
-                </button>
-              )}
+              <button
+                onClick={() => pullWorkspaceFromSupabase(user)}
+                className="w-full py-2 px-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-slate-300"
+              >
+                ↻ Sync from Supabase
+              </button>
             </aside>
 
-            {/* Main Workspace */}
             <main className="flex-1 p-4 md:p-6 overflow-y-auto space-y-4">
-              {/* Quick-Add Bar */}
               <form
                 onSubmit={handleAddTask}
                 className="bg-[#131c2e] border border-slate-800 rounded-2xl p-3.5 flex flex-wrap items-end gap-2.5"
@@ -651,7 +664,6 @@
                 </button>
               </form>
 
-              {/* GANTT VIEW */}
               {activeTab === "gantt" && (
                 <div className="bg-[#111827] border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
                   <div className="overflow-x-auto">
@@ -683,80 +695,87 @@
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-800/70 text-sm">
-                        {cpmSchedule.tasks.map((t) => (
-                          <tr key={t.id} className="hover:bg-slate-800/40">
-                            <td className="px-3 py-2.5 text-center border-r border-slate-800/60">
-                              <input
-                                type="checkbox"
-                                checked={!!t.done}
-                                onChange={(e) => updateTaskField(t.id, "done", e.target.checked)}
-                                className="w-4 h-4 rounded accent-indigo-500 cursor-pointer"
-                              />
-                            </td>
-                            <td className="px-3 py-2.5 border-r border-slate-800/60 font-mono text-xs">
-                              <input
-                                type="text"
-                                value={t.wbs}
-                                onChange={(e) => updateTaskField(t.id, "wbs", e.target.value)}
-                                className="w-14 bg-transparent border border-transparent hover:border-slate-700 focus:border-indigo-500 rounded px-1 py-0.5 text-xs font-mono"
-                              />
-                            </td>
-                            <td className="px-4 py-2.5 border-r border-slate-800/60 font-medium">
-                              {t.name}
-                            </td>
-                            <td className="px-2.5 py-2 border-r border-slate-800/60">
-                              <input
-                                type="date"
-                                value={t.startDate || t.computedStartISO}
-                                onChange={(e) => updateTaskField(t.id, "startDate", e.target.value)}
-                                className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs"
-                              />
-                            </td>
-                            <td className="px-2.5 py-2 border-r border-slate-800/60">
-                              <input
-                                type="date"
-                                value={t.endDate || t.computedEndISO}
-                                onChange={(e) => updateTaskField(t.id, "endDate", e.target.value)}
-                                className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs"
-                              />
-                            </td>
-                            <td className="px-2 py-2 text-center border-r border-slate-800/60">
-                              <input
-                                type="number"
-                                min="1"
-                                value={t.duration}
-                                onChange={(e) => updateTaskField(t.id, "duration", e.target.value)}
-                                className="w-12 bg-slate-900 border border-slate-700 rounded px-1 py-1 text-xs text-center"
-                              />
-                            </td>
-                            <td className="px-2 py-2 text-center border-r border-slate-800/60 text-xs font-mono">
-                              {t.isCritical ? <span className="text-rose-400 font-bold">0d (CP)</span> : <span className="text-emerald-400">+{t.float}d</span>}
-                            </td>
-                            <td className="p-0 relative">
-                              <div className="flex relative h-11 items-center">
-                                {timelineDays.map((d) => (
-                                  <div key={d.index} className="w-12 h-full shrink-0 border-r border-slate-800/40" />
-                                ))}
-                                <div
-                                  style={{ left: `${t.es * 48 + 4}px`, width: `${Math.max(36, t.duration * 48 - 8)}px` }}
-                                  className={`absolute h-7 rounded-lg px-2.5 flex items-center justify-between text-xs font-medium shadow ${
-                                    t.done ? "bg-emerald-600/70 text-white" : t.isCritical ? "bg-rose-600/85 text-white" : "bg-indigo-600/85 text-white"
-                                  }`}
-                                >
-                                  <span className="truncate">{t.wbs} {t.name}</span>
-                                  <span className="text-[10px] opacity-80 ml-1">{t.duration}d</span>
-                                </div>
-                              </div>
+                        {cpmSchedule.tasks.length === 0 ? (
+                          <tr>
+                            <td colSpan="8" className="text-center py-8 text-slate-500 text-xs">
+                              No tasks in this project yet. Use the quick-add bar above to create your first WBS task!
                             </td>
                           </tr>
-                        ))}
+                        ) : (
+                          cpmSchedule.tasks.map((t) => (
+                            <tr key={t.id} className="hover:bg-slate-800/40">
+                              <td className="px-3 py-2.5 text-center border-r border-slate-800/60">
+                                <input
+                                  type="checkbox"
+                                  checked={!!t.done}
+                                  onChange={(e) => updateTaskField(t.id, "done", e.target.checked)}
+                                  className="w-4 h-4 rounded accent-indigo-500 cursor-pointer"
+                                />
+                              </td>
+                              <td className="px-3 py-2.5 border-r border-slate-800/60 font-mono text-xs">
+                                <input
+                                  type="text"
+                                  value={t.wbs}
+                                  onChange={(e) => updateTaskField(t.id, "wbs", e.target.value)}
+                                  className="w-14 bg-transparent border border-transparent hover:border-slate-700 focus:border-indigo-500 rounded px-1 py-0.5 text-xs font-mono"
+                                />
+                              </td>
+                              <td className="px-4 py-2.5 border-r border-slate-800/60 font-medium">
+                                {t.name}
+                              </td>
+                              <td className="px-2.5 py-2 border-r border-slate-800/60">
+                                <input
+                                  type="date"
+                                  value={t.startDate || t.computedStartISO}
+                                  onChange={(e) => updateTaskField(t.id, "startDate", e.target.value)}
+                                  className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs"
+                                />
+                              </td>
+                              <td className="px-2.5 py-2 border-r border-slate-800/60">
+                                <input
+                                  type="date"
+                                  value={t.endDate || t.computedEndISO}
+                                  onChange={(e) => updateTaskField(t.id, "endDate", e.target.value)}
+                                  className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs"
+                                />
+                              </td>
+                              <td className="px-2 py-2 text-center border-r border-slate-800/60">
+                                <input
+                                  type="number"
+                                  min="1"
+                                  value={t.duration}
+                                  onChange={(e) => updateTaskField(t.id, "duration", e.target.value)}
+                                  className="w-12 bg-slate-900 border border-slate-700 rounded px-1 py-1 text-xs text-center"
+                                />
+                              </td>
+                              <td className="px-2 py-2 text-center border-r border-slate-800/60 text-xs font-mono">
+                                {t.isCritical ? <span className="text-rose-400 font-bold">0d (CP)</span> : <span className="text-emerald-400">+{t.float}d</span>}
+                              </td>
+                              <td className="p-0 relative">
+                                <div className="flex relative h-11 items-center">
+                                  {timelineDays.map((d) => (
+                                    <div key={d.index} className="w-12 h-full shrink-0 border-r border-slate-800/40" />
+                                  ))}
+                                  <div
+                                    style={{ left: `${t.es * 48 + 4}px`, width: `${Math.max(36, t.duration * 48 - 8)}px` }}
+                                    className={`absolute h-7 rounded-lg px-2.5 flex items-center justify-between text-xs font-medium shadow ${
+                                      t.done ? "bg-emerald-600/70 text-white" : t.isCritical ? "bg-rose-600/85 text-white" : "bg-indigo-600/85 text-white"
+                                    }`}
+                                  >
+                                    <span className="truncate">{t.wbs} {t.name}</span>
+                                    <span className="text-[10px] opacity-80 ml-1">{t.duration}d</span>
+                                  </div>
+                                </div>
+                              </td>
+                            </tr>
+                          ))
+                        )}
                       </tbody>
                     </table>
                   </div>
                 </div>
               )}
 
-              {/* KANBAN VIEW */}
               {activeTab === "tasks" && (
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   {["To Do", "In Progress", "Done"].map((col) => (
@@ -775,7 +794,6 @@
             </main>
           </div>
 
-          {/* Mobile Bottom Navigation */}
           <nav className="md:hidden fixed bottom-0 inset-x-0 bg-[#111827] border-t border-slate-800 flex justify-around py-2.5 z-40">
             {[
               { id: "gantt", label: "Gantt" },
@@ -795,93 +813,6 @@
             ))}
           </nav>
 
-          {/* Supabase Auth & Multi-Tenant Config Modal */}
-          {showAuthModal && (
-            <div className="fixed inset-0 bg-black/65 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-              <div className="bg-[#111827] border border-slate-800 rounded-2xl p-6 w-full max-w-md space-y-4">
-                <div className="flex items-center justify-between">
-                  <h3 className="font-bold text-base">Supabase Cloud Auth & Sync</h3>
-                  <button onClick={() => setShowAuthModal(false)} className="text-slate-400 hover:text-white">✕</button>
-                </div>
-
-                {!DEFAULT_SUPABASE_URL && (
-                  <div className="space-y-2 border-b border-slate-800 pb-3">
-                    <div className="text-[11px] text-slate-400 font-semibold uppercase">1. Project Credentials (Public Anon)</div>
-                    <input
-                      type="url"
-                      value={sbUrl}
-                      onChange={(e) => { setSbUrl(e.target.value.trim()); localStorage.setItem(SB_URL_KEY, e.target.value.trim()); }}
-                      placeholder="https://xyzcompany.supabase.co"
-                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs font-mono"
-                    />
-                    <input
-                      type="text"
-                      value={sbAnon}
-                      onChange={(e) => { setSbAnon(e.target.value.trim()); localStorage.setItem(SB_ANON_KEY, e.target.value.trim()); }}
-                      placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9... (anon public key)"
-                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs font-mono"
-                    />
-                  </div>
-                )}
-
-                {user ? (
-                  <div className="space-y-3">
-                    <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-xs text-emerald-300">
-                      Signed in as <strong>{user.email}</strong><br />
-                      Status: {syncStatus} {lastSyncedAt && `at ${lastSyncedAt}`}
-                    </div>
-                    <button
-                      onClick={async () => { await supabase.auth.signOut(); setUser(null); setSyncStatus("Local Mode"); }}
-                      className="w-full py-2 rounded-lg bg-rose-600/20 border border-rose-500/40 text-rose-300 text-xs font-semibold"
-                    >
-                      Sign Out
-                    </button>
-                  </div>
-                ) : (
-                  <div className="space-y-2.5">
-                    <div className="text-[11px] text-slate-400 font-semibold uppercase">2. User Sign In / Sign Up</div>
-                    <input
-                      type="email"
-                      value={authEmail}
-                      onChange={(e) => setAuthEmail(e.target.value)}
-                      placeholder="you@airegistryhub.com"
-                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs"
-                    />
-                    <input
-                      type="password"
-                      value={authPassword}
-                      onChange={(e) => setAuthPassword(e.target.value)}
-                      placeholder="Password (or leave blank for Magic Link)"
-                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs"
-                    />
-                    {authMessage && <div className="text-xs text-indigo-300">{authMessage}</div>}
-                    <div className="grid grid-cols-3 gap-2 pt-1">
-                      <button
-                        onClick={() => handleSignInOrSignUp("login")}
-                        className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold py-2 rounded-lg"
-                      >
-                        Sign In
-                      </button>
-                      <button
-                        onClick={() => handleSignInOrSignUp("signup")}
-                        className="bg-slate-800 hover:bg-slate-700 text-white text-xs font-semibold py-2 rounded-lg"
-                      >
-                        Sign Up
-                      </button>
-                      <button
-                        onClick={() => handleSignInOrSignUp("magic")}
-                        className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold py-2 rounded-lg"
-                      >
-                        Magic Link
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* Create Program / Project Modal */}
           {showNewModal && (
             <div className="fixed inset-0 bg-black/65 backdrop-blur-sm flex items-center justify-center z-50 p-4">
               <form onSubmit={handleCreateProgramOrProject} className="bg-[#111827] border border-slate-800 rounded-2xl p-6 w-full max-w-md space-y-4">
