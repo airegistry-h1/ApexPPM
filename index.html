@@ -1,0 +1,909 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#0b0f19" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="ApexPPM" />
+  <title>ApexPPM — Multi-User Cloud Portfolio Manager</title>
+
+  <!-- Embedded PWA Manifest & Custom Icon -->
+  <script>
+    (function() {
+      const svgIcon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+        <rect width="512" height="512" rx="112" fill="#4f46e5"/>
+        <path d="M128 368L256 112L384 368H316L256 240L196 368H128Z" fill="#ffffff"/>
+        <circle cx="256" cy="356" r="32" fill="#10b981"/>
+      </svg>`;
+      const iconUrl = "data:image/svg+xml;base64," + btoa(svgIcon);
+      const linkIcon = document.createElement("link");
+      linkIcon.rel = "icon";
+      linkIcon.href = iconUrl;
+      document.head.appendChild(linkIcon);
+
+      const manifest = {
+        name: "ApexPPM Cloud Portfolio Manager",
+        short_name: "ApexPPM",
+        start_url: window.location.pathname || "./index.html",
+        display: "standalone",
+        background_color: "#0b0f19",
+        theme_color: "#4f46e5",
+        icons: [{ src: iconUrl, sizes: "512x512", type: "image/svg+xml", purpose: "any maskable" }]
+      };
+      const manifestBlob = new Blob([JSON.stringify(manifest)], { type: "application/manifest+json" });
+      const manifestLink = document.createElement("link");
+      manifestLink.rel = "manifest";
+      manifestLink.href = URL.createObjectURL(manifestBlob);
+      document.head.appendChild(manifestLink);
+    })();
+  </script>
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    body { background-color: #0b0f19; color: #f1f5f9; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-track { background: #111827; }
+    ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+    input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.8); cursor: pointer; }
+  </style>
+</head>
+<body class="min-h-screen antialiased selection:bg-indigo-500 selection:text-white">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useMemo, useRef } = React;
+
+    // OPTIONAL: Paste your restored Supabase URL & Anon Key here before deploying to Cloudflare Pages
+    // so external users never have to configure anything—they just Sign Up / Sign In!
+    const DEFAULT_SUPABASE_URL = "https://tzqbzzdctwdyvwvyvwzk.supabase.co";
+    const DEFAULT_SUPABASE_ANON_KEY = "sb_publishable_Jve6BGkRJUrhkX8vMlDJUA_m_4RoWpT";
+
+    const TODAY_ISO = new Date().toISOString().slice(0, 10);
+    const STORAGE_KEY = "apexpms_supabase_cache_v4";
+    const SB_URL_KEY = "apexpms_sb_url";
+    const SB_ANON_KEY = "apexpms_sb_anon";
+
+    const parseISO = (str) => {
+      if (!str) return new Date(TODAY_ISO + "T00:00:00");
+      const [y, m, d] = str.split("-").map(Number);
+      return new Date(y, m - 1, d);
+    };
+
+    const formatISO = (date) => {
+      const y = date.getFullYear();
+      const m = String(date.getMonth() + 1).padStart(2, "0");
+      const d = String(date.getDate()).padStart(2, "0");
+      return `${y}-${m}-${d}`;
+    };
+
+    const addDaysISO = (isoStr, days) => {
+      const dt = parseISO(isoStr);
+      dt.setDate(dt.getDate() + Number(days || 0));
+      return formatISO(dt);
+    };
+
+    const diffDaysISO = (startISO, endISO) => {
+      const s = parseISO(startISO);
+      const e = parseISO(endISO);
+      return Math.round((e - s) / (1000 * 60 * 60 * 24));
+    };
+
+    const formatShortDate = (isoStr) => {
+      if (!isoStr) return "";
+      return parseISO(isoStr).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    };
+
+    const DEFAULT_STATE = {
+      programs: [
+        { id: "pgm-1", code: "PGM-01", name: "AI Registry Hub", manager: "Mustafa Nisar", budget: 250000 }
+      ],
+      projects: [
+        { id: "prj-1", programId: "pgm-1", code: "PRJ-01", name: "Frontend Development", methodology: "Hybrid (CPM + Agile)", baselineStart: TODAY_ISO }
+      ],
+      tasks: [
+        {
+          id: "tsk-1",
+          projectId: "prj-1",
+          wbs: "1.1",
+          name: "Pilot Proposal",
+          startDate: TODAY_ISO,
+          endDate: addDaysISO(TODAY_ISO, 15),
+          duration: 15,
+          predecessorId: "",
+          depType: "FS",
+          lag: 0,
+          status: "In Progress",
+          done: false,
+          owner: "Mustafa",
+          pv: 12000,
+          ac: 10500,
+          percentComplete: 40
+        }
+      ],
+      risks: [
+        { id: "rsk-1", projectId: "prj-1", title: "External schema drift across providers", probability: 3, impact: 4, mitigation: "Automated JSON validation & staging buffer", status: "Open" }
+      ],
+      procurements: [
+        { id: "po-1", projectId: "prj-1", vendor: "Cloud Edge Infrastructure", contractType: "Fixed Price (FFP)", amount: 4800, wbsRef: "1.1" }
+      ]
+    };
+
+    function App() {
+      // Supabase Credentials & Client
+      const [sbUrl, setSbUrl] = useState(() => DEFAULT_SUPABASE_URL || localStorage.getItem(SB_URL_KEY) || "");
+      const [sbAnon, setSbAnon] = useState(() => DEFAULT_SUPABASE_ANON_KEY || localStorage.getItem(SB_ANON_KEY) || "");
+      const [user, setUser] = useState(null);
+      const [authEmail, setAuthEmail] = useState("");
+      const [authPassword, setAuthPassword] = useState("");
+      const [authMessage, setAuthMessage] = useState("");
+      const [showAuthModal, setShowAuthModal] = useState(false);
+
+      const [syncStatus, setSyncStatus] = useState("Local Mode");
+      const [lastSyncedAt, setLastSyncedAt] = useState(null);
+      const isPullingRef = useRef(false);
+
+      const supabase = useMemo(() => {
+        if (!sbUrl || !sbAnon || !window.supabase) return null;
+        try {
+          return window.supabase.createClient(sbUrl, sbAnon);
+        } catch (e) {
+          console.error("Invalid Supabase config:", e);
+          return null;
+        }
+      }, [sbUrl, sbAnon]);
+
+      const [data, setData] = useState(() => {
+        try {
+          const saved = localStorage.getItem(STORAGE_KEY);
+          if (saved) return JSON.parse(saved);
+        } catch (e) {}
+        return DEFAULT_STATE;
+      });
+
+      const [selectedProgramId, setSelectedProgramId] = useState(() => data.programs[0]?.id || "ALL");
+      const [selectedProjectId, setSelectedProjectId] = useState(() => data.projects[0]?.id || "ALL");
+      const [activeTab, setActiveTab] = useState("gantt");
+      const [showNewModal, setShowNewModal] = useState(false);
+
+      // Quick-Add inputs
+      const [qaWbs, setQaWbs] = useState("");
+      const [qaName, setQaName] = useState("");
+      const [qaStartDate, setQaStartDate] = useState(TODAY_ISO);
+      const [qaDuration, setQaDuration] = useState(5);
+      const [qaEndDate, setQaEndDate] = useState(addDaysISO(TODAY_ISO, 5));
+      const [qaPred, setQaPred] = useState("");
+      const [qaDepType, setQaDepType] = useState("FS");
+
+      // Modal inputs
+      const [modalMode, setModalMode] = useState("project");
+      const [newCode, setNewCode] = useState("");
+      const [newName, setNewName] = useState("");
+
+      // Listen for Supabase Auth session
+      useEffect(() => {
+        if (!supabase) return;
+        supabase.auth.getSession().then(({ data: { session } }) => {
+          setUser(session?.user ?? null);
+        });
+        const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+          setUser(session?.user ?? null);
+        });
+        return () => subscription.unsubscribe();
+      }, [supabase]);
+
+      // Load user's isolated workspace from Supabase
+      const pullWorkspaceFromSupabase = async (activeUser = user) => {
+        if (!supabase || !activeUser) return;
+        try {
+          setSyncStatus("Syncing...");
+          const { data: row, error } = await supabase
+            .from("workspaces")
+            .select("state, updated_at")
+            .eq("user_id", activeUser.id)
+            .maybeSingle();
+
+          if (error) throw error;
+
+          if (row && row.state && row.state.programs) {
+            isPullingRef.current = true;
+            setData(row.state);
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(row.state));
+            setLastSyncedAt(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
+            setSyncStatus("Supabase Synced");
+            setTimeout(() => { isPullingRef.current = false; }, 300);
+          } else {
+            // First login for this user -> initialize their cloud row with current local data
+            await pushWorkspaceToSupabase(data, activeUser);
+          }
+        } catch (err) {
+          console.error("Supabase pull error:", err);
+          setSyncStatus("Offline (Cached)");
+        }
+      };
+
+      // Upsert user's workspace into Supabase
+      const pushWorkspaceToSupabase = async (stateToSave, activeUser = user) => {
+        if (!supabase || !activeUser) return;
+        try {
+          setSyncStatus("Saving...");
+          const { error } = await supabase
+            .from("workspaces")
+            .upsert({
+              user_id: activeUser.id,
+              email: activeUser.email,
+              state: stateToSave,
+              updated_at: new Date().toISOString()
+            });
+          if (error) throw error;
+          setLastSyncedAt(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
+          setSyncStatus("Supabase Synced");
+        } catch (err) {
+          console.error("Supabase push error:", err);
+          setSyncStatus("Offline (Cached)");
+        }
+      };
+
+      useEffect(() => {
+        if (user && supabase) {
+          pullWorkspaceFromSupabase(user);
+          const onFocus = () => pullWorkspaceFromSupabase(user);
+          window.addEventListener("focus", onFocus);
+          return () => window.removeEventListener("focus", onFocus);
+        }
+      }, [user, supabase]);
+
+      useEffect(() => {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+        if (!user || !supabase || isPullingRef.current) return;
+        const timer = setTimeout(() => {
+          pushWorkspaceToSupabase(data, user);
+        }, 500);
+        return () => clearTimeout(timer);
+      }, [data, user, supabase]);
+
+      // Auth Handlers
+      const handleSignInOrSignUp = async (mode) => {
+        if (!supabase) {
+          setAuthMessage("Please enter your Supabase Project URL and Anon Key first.");
+          return;
+        }
+        setAuthMessage("Processing...");
+        try {
+          if (mode === "magic") {
+            const { error } = await supabase.auth.signInWithOtp({ email: authEmail });
+            if (error) throw error;
+            setAuthMessage("Check your email for the login link!");
+          } else if (mode === "signup") {
+            const { error } = await supabase.auth.signUp({ email: authEmail, password: authPassword });
+            if (error) throw error;
+            setAuthMessage("Account created! Signed in or check email confirmation.");
+          } else {
+            const { error } = await supabase.auth.signInWithPassword({ email: authEmail, password: authPassword });
+            if (error) throw error;
+            setAuthMessage("Signed in!");
+            setShowAuthModal(false);
+          }
+        } catch (err) {
+          setAuthMessage(err.message || "Authentication failed");
+        }
+      };
+
+      const programProjects = useMemo(() => {
+        if (selectedProgramId === "ALL") return data.projects;
+        return data.projects.filter((p) => p.programId === selectedProgramId);
+      }, [data.projects, selectedProgramId]);
+
+      const visibleTasks = useMemo(() => {
+        return data.tasks.filter((t) => {
+          if (selectedProjectId !== "ALL") return t.projectId === selectedProjectId;
+          if (selectedProgramId !== "ALL") return programProjects.some((p) => p.id === t.projectId);
+          return true;
+        });
+      }, [data.tasks, selectedProjectId, selectedProgramId, programProjects]);
+
+      const nextSuggestedWbs = useMemo(() => {
+        const targetPrjId = selectedProjectId !== "ALL" ? selectedProjectId : (programProjects[0]?.id || data.projects[0]?.id);
+        const targetPrj = data.projects.find((p) => p.id === targetPrjId);
+        if (!targetPrj) return "1.1";
+        const siblingProjects = data.projects.filter((p) => p.programId === targetPrj.programId);
+        const prjIdx = Math.max(1, siblingProjects.findIndex((p) => p.id === targetPrj.id) + 1);
+        const prjTasks = data.tasks.filter((t) => t.projectId === targetPrj.id);
+        return `${prjIdx}.${prjTasks.length + 1}`;
+      }, [data.projects, data.tasks, selectedProjectId, programProjects]);
+
+      const cpmSchedule = useMemo(() => {
+        if (visibleTasks.length === 0) {
+          return { tasks: [], anchorDate: TODAY_ISO, totalSpanDays: 25, criticalCount: 0 };
+        }
+        const earliestISO = visibleTasks.reduce((minISO, t) => {
+          const s = t.startDate || TODAY_ISO;
+          return s < minISO ? s : minISO;
+        }, visibleTasks[0]?.startDate || TODAY_ISO);
+
+        const nodes = visibleTasks.map((t) => {
+          const manualStartOffset = Math.max(0, diffDaysISO(earliestISO, t.startDate || earliestISO));
+          const dur = Math.max(1, Number(t.duration || 1));
+          return { ...t, duration: dur, manualStartOffset, es: manualStartOffset, ef: manualStartOffset + dur, ls: 0, lf: 0, float: 0, isCritical: false };
+        });
+
+        const map = {};
+        nodes.forEach((n) => (map[n.id] = n));
+
+        for (let i = 0; i < nodes.length + 2; i++) {
+          nodes.forEach((n) => {
+            let es = n.manualStartOffset;
+            if (n.predecessorId && map[n.predecessorId]) {
+              const pred = map[n.predecessorId];
+              const lag = Number(n.lag || 0);
+              if (n.depType === "FS") es = Math.max(es, pred.ef + lag);
+              else if (n.depType === "SS") es = Math.max(es, pred.es + lag);
+              else if (n.depType === "FF") es = Math.max(es, pred.ef + lag - n.duration);
+              else if (n.depType === "SF") es = Math.max(es, pred.es + lag - n.duration);
+            }
+            n.es = Math.max(0, es);
+            n.ef = n.es + n.duration;
+          });
+        }
+
+        const maxEF = Math.max(...nodes.map((n) => n.ef), 1);
+        nodes.forEach((n) => { n.lf = maxEF; n.ls = n.lf - n.duration; });
+
+        for (let i = 0; i < nodes.length + 2; i++) {
+          nodes.forEach((n) => {
+            const deps = nodes.filter((d) => d.predecessorId === n.id);
+            if (deps.length > 0) {
+              let minLF = maxEF;
+              deps.forEach((dep) => {
+                const lag = Number(dep.lag || 0);
+                let reqLF = maxEF;
+                if (dep.depType === "FS") reqLF = dep.ls - lag;
+                else if (dep.depType === "SS") reqLF = dep.ls - lag + n.duration;
+                else if (dep.depType === "FF") reqLF = dep.lf - lag;
+                else if (dep.depType === "SF") reqLF = dep.lf - lag + n.duration;
+                if (reqLF < minLF) minLF = reqLF;
+              });
+              n.lf = minLF;
+              n.ls = n.lf - n.duration;
+            }
+          });
+        }
+
+        nodes.forEach((n) => {
+          n.float = Math.max(0, n.ls - n.es);
+          n.isCritical = n.float === 0 && !n.done;
+          n.computedStartISO = addDaysISO(earliestISO, n.es);
+          n.computedEndISO = addDaysISO(earliestISO, n.ef);
+        });
+
+        return {
+          tasks: nodes,
+          anchorDate: earliestISO,
+          totalSpanDays: Math.max(25, maxEF + 5),
+          criticalCount: nodes.filter((n) => n.isCritical).length
+        };
+      }, [visibleTasks]);
+
+      const timelineDays = useMemo(() => {
+        return Array.from({ length: cpmSchedule.totalSpanDays }, (_, i) => {
+          const iso = addDaysISO(cpmSchedule.anchorDate, i);
+          return { index: i + 1, iso, label: formatShortDate(iso) };
+        });
+      }, [cpmSchedule.anchorDate, cpmSchedule.totalSpanDays]);
+
+      const handleAddTask = (e) => {
+        e.preventDefault();
+        if (!qaName.trim()) return;
+        const targetPrjId = selectedProjectId !== "ALL" ? selectedProjectId : (programProjects[0]?.id || data.projects[0]?.id);
+        const newTask = {
+          id: "tsk-" + Date.now(),
+          projectId: targetPrjId,
+          wbs: qaWbs.trim() || nextSuggestedWbs,
+          name: qaName.trim(),
+          startDate: qaStartDate || TODAY_ISO,
+          endDate: qaEndDate || addDaysISO(qaStartDate || TODAY_ISO, qaDuration),
+          duration: Math.max(1, Number(qaDuration || 1)),
+          predecessorId: qaPred,
+          depType: qaDepType,
+          lag: 0,
+          status: "To Do",
+          done: false,
+          owner: user?.email?.split("@")[0] || "Owner",
+          pv: 5000,
+          ac: 0,
+          percentComplete: 0
+        };
+        setData((prev) => ({ ...prev, tasks: [...prev.tasks, newTask] }));
+        setQaName("");
+        setQaWbs("");
+      };
+
+      const updateTaskField = (taskId, field, value) => {
+        setData((prev) => ({
+          ...prev,
+          tasks: prev.tasks.map((t) => {
+            if (t.id !== taskId) return t;
+            const u = { ...t, [field]: value };
+            if (field === "startDate") u.endDate = addDaysISO(value, u.duration);
+            else if (field === "duration") {
+              u.duration = Math.max(1, Number(value || 1));
+              u.endDate = addDaysISO(u.startDate || TODAY_ISO, u.duration);
+            } else if (field === "endDate") {
+              const diff = diffDaysISO(u.startDate || TODAY_ISO, value);
+              if (diff >= 1) u.duration = diff;
+              else { u.startDate = addDaysISO(value, -1); u.duration = 1; }
+            } else if (field === "done") {
+              u.status = value ? "Done" : "In Progress";
+            }
+            return u;
+          })
+        }));
+      };
+
+      const handleCreateProgramOrProject = (e) => {
+        e.preventDefault();
+        if (!newName.trim()) return;
+        if (modalMode === "program") {
+          const id = "pgm-" + Date.now();
+          const code = newCode.trim() || `PGM-0${data.programs.length + 1}`;
+          setData((prev) => ({ ...prev, programs: [...prev.programs, { id, code, name: newName.trim(), manager: user?.email || "Manager", budget: 150000 }] }));
+          setSelectedProgramId(id);
+        } else {
+          const id = "prj-" + Date.now();
+          const parentPgm = selectedProgramId !== "ALL" ? selectedProgramId : data.programs[0]?.id;
+          const count = data.projects.filter((p) => p.programId === parentPgm).length;
+          const code = newCode.trim() || `PRJ-0${count + 1}`;
+          setData((prev) => ({ ...prev, projects: [...prev.projects, { id, programId: parentPgm, code, name: newName.trim(), methodology: "Hybrid", baselineStart: TODAY_ISO }] }));
+          setSelectedProjectId(id);
+        }
+        setNewName("");
+        setNewCode("");
+        setShowNewModal(false);
+      };
+
+      return (
+        <div className="min-h-screen flex flex-col bg-[#0b0f19] text-slate-100 pb-16 md:pb-0">
+          {/* Header */}
+          <header className="border-b border-slate-800 bg-[#111827]/95 backdrop-blur px-4 md:px-6 py-3 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-indigo-600 flex items-center justify-center font-bold text-base shadow-lg shadow-indigo-600/30">
+                A
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h1 className="text-base md:text-lg font-bold tracking-tight">ApexPPM</h1>
+                  <button
+                    onClick={() => setShowAuthModal(true)}
+                    className={`text-[11px] px-2.5 py-0.5 rounded-full border transition ${
+                      user
+                        ? "bg-emerald-500/15 text-emerald-300 border-emerald-500/30"
+                        : "bg-amber-500/15 text-amber-300 border-amber-500/30"
+                    }`}
+                  >
+                    ● {user ? `${syncStatus} (${user.email})` : "Sign In / Connect Supabase"}
+                  </button>
+                </div>
+                <div className="text-[11px] text-slate-400">
+                  Multi-Tenant Cloud PWA • Today: {formatShortDate(TODAY_ISO)}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <select
+                value={selectedProgramId}
+                onChange={(e) => setSelectedProgramId(e.target.value)}
+                className="bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs md:text-sm"
+              >
+                <option value="ALL">All Programs ({data.programs.length})</option>
+                {data.programs.map((pgm) => (
+                  <option key={pgm.id} value={pgm.id}>{pgm.code}: {pgm.name}</option>
+                ))}
+              </select>
+
+              <select
+                value={selectedProjectId}
+                onChange={(e) => setSelectedProjectId(e.target.value)}
+                className="bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs md:text-sm"
+              >
+                <option value="ALL">All Projects ({programProjects.length})</option>
+                {programProjects.map((prj) => (
+                  <option key={prj.id} value={prj.id}>{prj.code}: {prj.name}</option>
+                ))}
+              </select>
+
+              <button
+                onClick={() => setShowNewModal(true)}
+                className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs md:text-sm font-medium px-3 py-1.5 rounded-lg"
+              >
+                + Program / Project
+              </button>
+
+              <button
+                onClick={() => setShowAuthModal(true)}
+                className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs md:text-sm font-medium px-3 py-1.5 rounded-lg"
+              >
+                {user ? "Account & Cloud" : "Sign In"}
+              </button>
+            </div>
+          </header>
+
+          <div className="flex-1 flex overflow-hidden">
+            {/* Desktop Sidebar */}
+            <aside className="hidden md:flex w-60 border-r border-slate-800 bg-[#0f1624] p-4 flex-col justify-between shrink-0">
+              <div className="space-y-1.5">
+                {[
+                  { id: "gantt", label: "Gantt & Critical Path", badge: `${cpmSchedule.criticalCount} CP` },
+                  { id: "tasks", label: "Tasks & Jira Board", badge: visibleTasks.length },
+                  { id: "risks", label: "Risk Register (RAID)", badge: data.risks.length },
+                  { id: "procurement", label: "Procurement & POs", badge: data.procurements.length }
+                ].map((item) => (
+                  <button
+                    key={item.id}
+                    onClick={() => setActiveTab(item.id)}
+                    className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm font-medium transition ${
+                      activeTab === item.id ? "bg-indigo-600 text-white" : "text-slate-300 hover:bg-slate-800/70"
+                    }`}
+                  >
+                    <span>{item.label}</span>
+                    <span className="text-xs px-2 py-0.5 rounded bg-black/25">{item.badge}</span>
+                  </button>
+                ))}
+              </div>
+              {user && (
+                <button
+                  onClick={() => pullWorkspaceFromSupabase(user)}
+                  className="w-full py-2 px-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-slate-300"
+                >
+                  ↻ Sync from Supabase
+                </button>
+              )}
+            </aside>
+
+            {/* Main Workspace */}
+            <main className="flex-1 p-4 md:p-6 overflow-y-auto space-y-4">
+              {/* Quick-Add Bar */}
+              <form
+                onSubmit={handleAddTask}
+                className="bg-[#131c2e] border border-slate-800 rounded-2xl p-3.5 flex flex-wrap items-end gap-2.5"
+              >
+                <div className="w-16">
+                  <label className="block text-[10px] text-slate-400 mb-1">WBS</label>
+                  <input
+                    type="text"
+                    value={qaWbs}
+                    onChange={(e) => setQaWbs(e.target.value)}
+                    placeholder={nextSuggestedWbs}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-xs"
+                  />
+                </div>
+                <div className="flex-1 min-w-[180px]">
+                  <label className="block text-[10px] text-slate-400 mb-1">Task Name</label>
+                  <input
+                    type="text"
+                    value={qaName}
+                    onChange={(e) => setQaName(e.target.value)}
+                    placeholder="Add task..."
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] text-slate-400 mb-1">Start Date</label>
+                  <input
+                    type="date"
+                    value={qaStartDate}
+                    onChange={(e) => {
+                      setQaStartDate(e.target.value);
+                      setQaEndDate(addDaysISO(e.target.value, qaDuration));
+                    }}
+                    className="bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-xs"
+                  />
+                </div>
+                <div className="w-16">
+                  <label className="block text-[10px] text-slate-400 mb-1">Days</label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={qaDuration}
+                    onChange={(e) => {
+                      const d = Math.max(1, Number(e.target.value || 1));
+                      setQaDuration(d);
+                      setQaEndDate(addDaysISO(qaStartDate, d));
+                    }}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] text-slate-400 mb-1">End Date</label>
+                  <input
+                    type="date"
+                    value={qaEndDate}
+                    onChange={(e) => {
+                      setQaEndDate(e.target.value);
+                      setQaDuration(Math.max(1, diffDaysISO(qaStartDate, e.target.value)));
+                    }}
+                    className="bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] text-slate-400 mb-1">Predecessor</label>
+                  <select
+                    value={qaPred}
+                    onChange={(e) => setQaPred(e.target.value)}
+                    className="bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-xs"
+                  >
+                    <option value="">None</option>
+                    {visibleTasks.map((t) => (
+                      <option key={t.id} value={t.id}>{t.wbs} {t.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <button
+                  type="submit"
+                  className="bg-indigo-600 hover:bg-indigo-500 text-white font-medium text-xs px-4 py-2 rounded-lg"
+                >
+                  Add Task
+                </button>
+              </form>
+
+              {/* GANTT VIEW */}
+              {activeTab === "gantt" && (
+                <div className="bg-[#111827] border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+                  <div className="overflow-x-auto">
+                    <table className="w-full border-collapse text-left">
+                      <thead>
+                        <tr className="border-b border-slate-800 bg-slate-900/90 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                          <th className="w-14 min-w-[56px] px-3 py-3 text-center border-r border-slate-800">DONE</th>
+                          <th className="w-20 min-w-[76px] px-3 py-3 border-r border-slate-800">WBS</th>
+                          <th className="min-w-[200px] px-4 py-3 border-r border-slate-800">TASK NAME</th>
+                          <th className="min-w-[130px] px-3 py-3 border-r border-slate-800">START DATE</th>
+                          <th className="min-w-[130px] px-3 py-3 border-r border-slate-800">END DATE</th>
+                          <th className="w-16 px-2 py-3 text-center border-r border-slate-800">DUR</th>
+                          <th className="w-20 px-2 py-3 text-center border-r border-slate-800">FLOAT</th>
+                          <th className="p-0">
+                            <div className="flex">
+                              {timelineDays.map((d) => (
+                                <div
+                                  key={d.index}
+                                  className={`w-12 shrink-0 py-2 text-center border-r border-slate-800/70 ${
+                                    d.iso === TODAY_ISO ? "bg-indigo-500/20 text-indigo-300 font-bold" : ""
+                                  }`}
+                                >
+                                  <div className="text-[10px]">D{d.index}</div>
+                                  <div className="text-[9px] text-slate-400">{d.label}</div>
+                                </div>
+                              ))}
+                            </div>
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800/70 text-sm">
+                        {cpmSchedule.tasks.map((t) => (
+                          <tr key={t.id} className="hover:bg-slate-800/40">
+                            <td className="px-3 py-2.5 text-center border-r border-slate-800/60">
+                              <input
+                                type="checkbox"
+                                checked={!!t.done}
+                                onChange={(e) => updateTaskField(t.id, "done", e.target.checked)}
+                                className="w-4 h-4 rounded accent-indigo-500 cursor-pointer"
+                              />
+                            </td>
+                            <td className="px-3 py-2.5 border-r border-slate-800/60 font-mono text-xs">
+                              <input
+                                type="text"
+                                value={t.wbs}
+                                onChange={(e) => updateTaskField(t.id, "wbs", e.target.value)}
+                                className="w-14 bg-transparent border border-transparent hover:border-slate-700 focus:border-indigo-500 rounded px-1 py-0.5 text-xs font-mono"
+                              />
+                            </td>
+                            <td className="px-4 py-2.5 border-r border-slate-800/60 font-medium">
+                              {t.name}
+                            </td>
+                            <td className="px-2.5 py-2 border-r border-slate-800/60">
+                              <input
+                                type="date"
+                                value={t.startDate || t.computedStartISO}
+                                onChange={(e) => updateTaskField(t.id, "startDate", e.target.value)}
+                                className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs"
+                              />
+                            </td>
+                            <td className="px-2.5 py-2 border-r border-slate-800/60">
+                              <input
+                                type="date"
+                                value={t.endDate || t.computedEndISO}
+                                onChange={(e) => updateTaskField(t.id, "endDate", e.target.value)}
+                                className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs"
+                              />
+                            </td>
+                            <td className="px-2 py-2 text-center border-r border-slate-800/60">
+                              <input
+                                type="number"
+                                min="1"
+                                value={t.duration}
+                                onChange={(e) => updateTaskField(t.id, "duration", e.target.value)}
+                                className="w-12 bg-slate-900 border border-slate-700 rounded px-1 py-1 text-xs text-center"
+                              />
+                            </td>
+                            <td className="px-2 py-2 text-center border-r border-slate-800/60 text-xs font-mono">
+                              {t.isCritical ? <span className="text-rose-400 font-bold">0d (CP)</span> : <span className="text-emerald-400">+{t.float}d</span>}
+                            </td>
+                            <td className="p-0 relative">
+                              <div className="flex relative h-11 items-center">
+                                {timelineDays.map((d) => (
+                                  <div key={d.index} className="w-12 h-full shrink-0 border-r border-slate-800/40" />
+                                ))}
+                                <div
+                                  style={{ left: `${t.es * 48 + 4}px`, width: `${Math.max(36, t.duration * 48 - 8)}px` }}
+                                  className={`absolute h-7 rounded-lg px-2.5 flex items-center justify-between text-xs font-medium shadow ${
+                                    t.done ? "bg-emerald-600/70 text-white" : t.isCritical ? "bg-rose-600/85 text-white" : "bg-indigo-600/85 text-white"
+                                  }`}
+                                >
+                                  <span className="truncate">{t.wbs} {t.name}</span>
+                                  <span className="text-[10px] opacity-80 ml-1">{t.duration}d</span>
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* KANBAN VIEW */}
+              {activeTab === "tasks" && (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {["To Do", "In Progress", "Done"].map((col) => (
+                    <div key={col} className="bg-[#111827] border border-slate-800 rounded-2xl p-4 space-y-3">
+                      <div className="font-semibold text-sm border-b border-slate-800 pb-2">{col}</div>
+                      {cpmSchedule.tasks.filter((t) => t.status === col).map((t) => (
+                        <div key={t.id} className="p-3 rounded-xl bg-slate-900 border border-slate-800 space-y-1">
+                          <div className="text-xs font-mono text-indigo-400">{t.wbs} • {formatShortDate(t.startDate)} → {formatShortDate(t.endDate)}</div>
+                          <div className="text-sm font-medium">{t.name}</div>
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </main>
+          </div>
+
+          {/* Mobile Bottom Navigation */}
+          <nav className="md:hidden fixed bottom-0 inset-x-0 bg-[#111827] border-t border-slate-800 flex justify-around py-2.5 z-40">
+            {[
+              { id: "gantt", label: "Gantt" },
+              { id: "tasks", label: "Board" },
+              { id: "risks", label: "Risks" },
+              { id: "procurement", label: "POs" }
+            ].map((t) => (
+              <button
+                key={t.id}
+                onClick={() => setActiveTab(t.id)}
+                className={`text-xs font-semibold px-3 py-1 rounded-lg ${
+                  activeTab === t.id ? "bg-indigo-600 text-white" : "text-slate-400"
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </nav>
+
+          {/* Supabase Auth & Multi-Tenant Config Modal */}
+          {showAuthModal && (
+            <div className="fixed inset-0 bg-black/65 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+              <div className="bg-[#111827] border border-slate-800 rounded-2xl p-6 w-full max-w-md space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-bold text-base">Supabase Cloud Auth & Sync</h3>
+                  <button onClick={() => setShowAuthModal(false)} className="text-slate-400 hover:text-white">✕</button>
+                </div>
+
+                {!DEFAULT_SUPABASE_URL && (
+                  <div className="space-y-2 border-b border-slate-800 pb-3">
+                    <div className="text-[11px] text-slate-400 font-semibold uppercase">1. Project Credentials (Public Anon)</div>
+                    <input
+                      type="url"
+                      value={sbUrl}
+                      onChange={(e) => { setSbUrl(e.target.value.trim()); localStorage.setItem(SB_URL_KEY, e.target.value.trim()); }}
+                      placeholder="https://xyzcompany.supabase.co"
+                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs font-mono"
+                    />
+                    <input
+                      type="text"
+                      value={sbAnon}
+                      onChange={(e) => { setSbAnon(e.target.value.trim()); localStorage.setItem(SB_ANON_KEY, e.target.value.trim()); }}
+                      placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9... (anon public key)"
+                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs font-mono"
+                    />
+                  </div>
+                )}
+
+                {user ? (
+                  <div className="space-y-3">
+                    <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-xs text-emerald-300">
+                      Signed in as <strong>{user.email}</strong><br />
+                      Status: {syncStatus} {lastSyncedAt && `at ${lastSyncedAt}`}
+                    </div>
+                    <button
+                      onClick={async () => { await supabase.auth.signOut(); setUser(null); setSyncStatus("Local Mode"); }}
+                      className="w-full py-2 rounded-lg bg-rose-600/20 border border-rose-500/40 text-rose-300 text-xs font-semibold"
+                    >
+                      Sign Out
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-2.5">
+                    <div className="text-[11px] text-slate-400 font-semibold uppercase">2. User Sign In / Sign Up</div>
+                    <input
+                      type="email"
+                      value={authEmail}
+                      onChange={(e) => setAuthEmail(e.target.value)}
+                      placeholder="you@airegistryhub.com"
+                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs"
+                    />
+                    <input
+                      type="password"
+                      value={authPassword}
+                      onChange={(e) => setAuthPassword(e.target.value)}
+                      placeholder="Password (or leave blank for Magic Link)"
+                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs"
+                    />
+                    {authMessage && <div className="text-xs text-indigo-300">{authMessage}</div>}
+                    <div className="grid grid-cols-3 gap-2 pt-1">
+                      <button
+                        onClick={() => handleSignInOrSignUp("login")}
+                        className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold py-2 rounded-lg"
+                      >
+                        Sign In
+                      </button>
+                      <button
+                        onClick={() => handleSignInOrSignUp("signup")}
+                        className="bg-slate-800 hover:bg-slate-700 text-white text-xs font-semibold py-2 rounded-lg"
+                      >
+                        Sign Up
+                      </button>
+                      <button
+                        onClick={() => handleSignInOrSignUp("magic")}
+                        className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold py-2 rounded-lg"
+                      >
+                        Magic Link
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Create Program / Project Modal */}
+          {showNewModal && (
+            <div className="fixed inset-0 bg-black/65 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+              <form onSubmit={handleCreateProgramOrProject} className="bg-[#111827] border border-slate-800 rounded-2xl p-6 w-full max-w-md space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-bold text-base">Create Program or Project</h3>
+                  <button type="button" onClick={() => setShowNewModal(false)} className="text-slate-400">✕</button>
+                </div>
+                <div className="flex gap-2">
+                  <button type="button" onClick={() => setModalMode("project")} className={`flex-1 py-2 rounded-lg text-xs font-semibold ${modalMode === "project" ? "bg-indigo-600 text-white" : "bg-slate-800 text-slate-300"}`}>New Project</button>
+                  <button type="button" onClick={() => setModalMode("program")} className={`flex-1 py-2 rounded-lg text-xs font-semibold ${modalMode === "program" ? "bg-indigo-600 text-white" : "bg-slate-800 text-slate-300"}`}>New Program</button>
+                </div>
+                <input type="text" value={newCode} onChange={(e) => setNewCode(e.target.value)} placeholder={modalMode === "program" ? "PGM-02" : "PRJ-02"} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm" />
+                <input type="text" value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Name..." className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm" />
+                <button type="submit" className="w-full py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-sm">Create</button>
+              </form>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  </script>
+</body>
+</html>
