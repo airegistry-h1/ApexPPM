@@ -224,6 +224,7 @@
       const [showManageModal, setShowManageModal] = useState(false);
       const [showReportModal, setShowReportModal] = useState(false);
       const [multiDepModalTask, setMultiDepModalTask] = useState(null);
+      const [assignModalTask, setAssignModalTask] = useState(null);
 
       // Management Form State
       const [manageAction, setManageAction] = useState("create");
@@ -238,7 +239,7 @@
       const [newResourceName, setNewResourceName] = useState("");
       const [newResourceRole, setNewResourceRole] = useState("Team Member");
 
-      // Quick-Add Inputs with safe string state for typing Decimals
+      // Quick-Add Inputs with safe decimal duration string
       const [qaType, setQaType] = useState("Task");
       const [qaWbs, setQaWbs] = useState("");
       const [qaName, setQaName] = useState("");
@@ -308,11 +309,21 @@
               risks: row.state.risks || INITIAL_EMPTY_WORKSPACE.risks,
               tasks: (row.state.tasks || []).map(t => {
                 const isM = t.itemType === "Milestone" || Number(t.duration) === 0;
+                // Normalize multiple assignments
+                let taskAssignments = t.assignments;
+                if (!taskAssignments || taskAssignments.length === 0) {
+                  taskAssignments = [{
+                    name: t.resource || "Mustafa Nisar",
+                    allocation: Number(t.allocation || 100)
+                  }];
+                }
                 return {
                   ...t,
                   itemType: isM ? "Milestone" : (t.itemType || "Task"),
                   duration: Number(t.duration !== undefined ? t.duration : 1),
-                  resource: t.resource || "Mustafa Nisar",
+                  assignments: taskAssignments,
+                  resource: taskAssignments[0]?.name || "Mustafa Nisar",
+                  allocation: taskAssignments[0]?.allocation || 100,
                   predecessors: t.predecessors || (t.predecessorId ? [{ id: t.predecessorId, type: t.depType || "FS", lag: Number(t.lag || 0) }] : [])
                 };
               })
@@ -421,7 +432,7 @@
             ...t,
             itemType: isMilestone ? "Milestone" : (t.itemType || "Task"),
             duration: dur,
-            allocation: Number(t.allocation || 100),
+            assignments: t.assignments || [{ name: t.resource || "Mustafa Nisar", allocation: Number(t.allocation || 100) }],
             predecessors: t.predecessors || (t.predecessorId ? [{ id: t.predecessorId, type: t.depType || "FS", lag: Number(t.lag || 0) }] : []),
             esDate: t.startDate || TODAY_ISO,
             efDate: t.endDate || (isMilestone ? (t.startDate || TODAY_ISO) : addDaysISO(t.startDate || TODAY_ISO, Math.ceil(dur)))
@@ -511,6 +522,49 @@
         };
       }, [visibleTasks, data.tasks]);
 
+      // Cross-Project Resource Loading & Over-Allocation Calculation
+      const resourceLoadingMap = useMemo(() => {
+        const loading = {};
+        (data.resources || []).forEach(r => {
+          loading[r.name] = { totalOverAllocDays: 0, days: {} };
+        });
+
+        data.tasks.forEach(task => {
+          if (task.done || task.itemType === "Milestone") return;
+          const start = task.startDate || TODAY_ISO;
+          const dur = Math.max(1, Math.ceil(Number(task.duration || 1)));
+          const taskAssignments = task.assignments || [{ name: task.resource || "Mustafa Nisar", allocation: Number(task.allocation || 100) }];
+
+          for (let d = 0; d < dur; d++) {
+            const dateISO = addDaysISO(start, d);
+            taskAssignments.forEach(asgn => {
+              const rName = asgn.name;
+              if (!loading[rName]) loading[rName] = { totalOverAllocDays: 0, days: {} };
+              if (!loading[rName].days[dateISO]) {
+                loading[rName].days[dateISO] = { totalAlloc: 0, tasks: [] };
+              }
+              loading[rName].days[dateISO].totalAlloc += Number(asgn.allocation || 100);
+              loading[rName].days[dateISO].tasks.push({
+                taskName: task.name,
+                wbs: task.wbs,
+                alloc: Number(asgn.allocation || 100)
+              });
+            });
+          }
+        });
+
+        // Count over-allocated dates
+        Object.keys(loading).forEach(rName => {
+          let overCount = 0;
+          Object.values(loading[rName].days).forEach(day => {
+            if (day.totalAlloc > 100) overCount++;
+          });
+          loading[rName].totalOverAllocDays = overCount;
+        });
+
+        return loading;
+      }, [data.tasks, data.resources]);
+
       // Timeline scale generator
       const timelineUnits = useMemo(() => {
         const totalDays = cpmSchedule.totalSpanDays;
@@ -593,22 +647,7 @@
         setData(prev => ({ ...prev, tasks: updated }));
       };
 
-      // Effort-Driven Allocation Handler
-      const handleAllocationChange = (taskId, newAlloc) => {
-        const alloc = Math.max(10, Math.min(200, Number(newAlloc || 100)));
-        setData(prev => ({
-          ...prev,
-          tasks: prev.tasks.map(t => {
-            if (t.id !== taskId || t.itemType === "Milestone") return t;
-            const baseWork = Math.max(0.125, Number(t.duration || 1) * (Number(t.allocation || 100) / 100));
-            const newDuration = Math.round((baseWork / (alloc / 100)) * 100) / 100;
-            const newEnd = addDaysISO(t.startDate || TODAY_ISO, Math.ceil(newDuration));
-            return { ...t, allocation: alloc, duration: newDuration, endDate: newEnd };
-          })
-        }));
-      };
-
-      // Item CRUD Handlers (Unblocked from erroneous milestone lock)
+      // Add Deliverable
       const handleAddItem = (e) => {
         e.preventDefault();
         if (!qaName.trim()) return;
@@ -626,6 +665,7 @@
           endDate: isMilestone ? (qaStartDate || TODAY_ISO) : addDaysISO(qaStartDate || TODAY_ISO, Math.ceil(parsedDur)),
           duration: parsedDur,
           predecessors: [],
+          assignments: [{ name: qaResource, allocation: Number(qaAllocation || 100) }],
           resource: qaResource,
           allocation: Number(qaAllocation || 100),
           status: "To Do",
@@ -639,7 +679,7 @@
         setQaWbs("");
       };
 
-      // Robust Field Update: Handles switching between Milestone & Task cleanly
+      // Field Update
       const updateTaskField = (taskId, field, value) => {
         setData(prev => ({
           ...prev,
@@ -653,7 +693,6 @@
                 updated.duration = 0;
                 updated.endDate = updated.startDate;
               } else {
-                // Restoring from Milestone to Task: ensure duration is at least 0.5 or 1 day
                 if (Number(updated.duration) <= 0) {
                   updated.duration = 1;
                   updated.endDate = addDaysISO(updated.startDate, 1);
@@ -704,6 +743,22 @@
               ...t,
               predecessors: (t.predecessors || []).filter(p => p.id !== taskId)
             }))
+        }));
+      };
+
+      // Multi-Resource Assignment Updates
+      const updateTaskAssignments = (taskId, newAssignments) => {
+        setData(prev => ({
+          ...prev,
+          tasks: prev.tasks.map(t => {
+            if (t.id !== taskId) return t;
+            return {
+              ...t,
+              assignments: newAssignments,
+              resource: newAssignments[0]?.name || "Mustafa Nisar",
+              allocation: newAssignments[0]?.allocation || 100
+            };
+          })
         }));
       };
 
@@ -922,7 +977,7 @@
               </div>
 
               <div className="text-xs text-slate-400 leading-relaxed">
-                Welcome to your multi-tenant PPM suite. Decimal duration scheduling, CPM dependency networks, RAID logs, and procurement controls powered by your secure DB.
+                Welcome to your multi-tenant PPM suite. Resource load heatmaps, decimal duration scheduling, CPM dependency networks, and procurement controls powered by your secure DB.
               </div>
 
               <div className="space-y-3 pt-2">
@@ -973,7 +1028,6 @@
           {/* Top Header with Exact Vector Logo Matching AI Registry Hub */}
           <header className="border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-[#111827] px-4 md:px-6 py-3 flex items-center justify-between gap-4 shadow-sm no-print">
             <div className="flex items-center gap-3">
-              {/* Exact AI Registry Hub Vector Logo Tile */}
               <div className="w-10 h-10 rounded-2xl bg-[#0b1120] border border-slate-800 flex items-center justify-center p-1.5 shadow-md">
                 <svg viewBox="0 0 512 512" className="w-full h-full">
                   <path d="M 256 106 A 150 150 0 1 1 142 354" fill="none" stroke="#10b981" strokeWidth="32" strokeLinecap="round"/>
@@ -1098,6 +1152,7 @@
               <div className="space-y-1.5">
                 {[
                   { id: "gantt", label: "Gantt & CPM Engine", badge: `${cpmSchedule.criticalCount} CP` },
+                  { id: "loading", label: "Resource Loading", badge: `${Object.values(resourceLoadingMap).filter(r => r.totalOverAllocDays > 0).length} Over` },
                   { id: "tasks", label: "Tasks & Effort Board", badge: visibleTasks.length },
                   { id: "risks", label: "Risk Register (RAID)", badge: (data.risks || []).length },
                   { id: "procurement", label: "Procurement & POs", badge: data.procurements.length }
@@ -1134,7 +1189,7 @@
 
             {/* Main Workspace Area */}
             <main className="flex-1 p-4 md:p-6 overflow-y-auto space-y-5 bg-slate-50/50 dark:bg-[#0b1120]">
-              {/* Deliverables Quick-Add Bar with Arbitrary Decimal / Sub-Day Durations */}
+              {/* Deliverables Quick-Add Bar */}
               {activeTab === "gantt" && (
                 <form
                   onSubmit={handleAddItem}
@@ -1255,7 +1310,7 @@
                           <th className="min-w-[110px] px-2 py-3 border-r border-slate-200 dark:border-slate-800">START</th>
                           <th className="min-w-[110px] px-2 py-3 border-r border-slate-200 dark:border-slate-800">END</th>
                           <th className="w-18 px-1 py-3 text-center border-r border-slate-200 dark:border-slate-800">DUR (DAYS)</th>
-                          <th className="min-w-[140px] px-2 py-3 border-r border-slate-200 dark:border-slate-800">RESOURCE & EFFORT</th>
+                          <th className="min-w-[160px] px-2 py-3 border-r border-slate-200 dark:border-slate-800">RESOURCES & EFFORT</th>
                           <th className="w-16 px-1 py-3 text-center border-r border-slate-200 dark:border-slate-800">FLOAT</th>
                           <th className="w-10 px-1 py-3 text-center">DEL</th>
                         </tr>
@@ -1368,7 +1423,6 @@
                                 />
                               </td>
 
-                              {/* Unlocked Duration Field: supports 0.5, 1, 2 days without step errors */}
                               <td className="px-1 py-1.5 text-center border-r border-slate-200 dark:border-slate-800">
                                 <input
                                   type="number"
@@ -1380,28 +1434,21 @@
                                 />
                               </td>
 
+                              {/* Multi-Resource Assignment Trigger */}
                               <td className="px-2 py-1.5 border-r border-slate-200 dark:border-slate-800">
-                                <div className="flex items-center gap-1">
-                                  <select
-                                    value={t.resource || "Mustafa Nisar"}
-                                    onChange={(e) => updateTaskField(t.id, "resource", e.target.value)}
-                                    className="bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded px-1 py-0.5 text-[10px] text-slate-800 dark:text-slate-200 max-w-[85px] truncate"
+                                <div className="flex flex-wrap items-center gap-1">
+                                  {(t.assignments || []).map((asgn, aIdx) => (
+                                    <span key={aIdx} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 text-[10px] font-medium">
+                                      <span>{asgn.name.split(" ")[0]} ({asgn.allocation}%)</span>
+                                    </span>
+                                  ))}
+                                  <button
+                                    onClick={() => setAssignModalTask(t)}
+                                    className="px-1.5 py-0.5 rounded border border-dashed border-slate-300 dark:border-slate-700 text-slate-500 hover:text-brand-emerald text-[10px]"
+                                    title="Edit Resource Assignments"
                                   >
-                                    {(data.resources || []).map(r => (
-                                      <option key={r.id} value={r.name}>{r.name}</option>
-                                    ))}
-                                  </select>
-                                  <select
-                                    value={t.allocation || 100}
-                                    disabled={t.itemType === "Milestone"}
-                                    onChange={(e) => handleAllocationChange(t.id, e.target.value)}
-                                    className="bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded px-1 py-0.5 text-[10px] font-mono text-brand-emerald disabled:opacity-50"
-                                  >
-                                    <option value="100">100%</option>
-                                    <option value="75">75%</option>
-                                    <option value="50">50%</option>
-                                    <option value="25">25%</option>
-                                  </select>
+                                    ⚙️ Assign
+                                  </button>
                                 </div>
                               </td>
 
@@ -1426,7 +1473,7 @@
                 </div>
               )}
 
-              {/* CARD 2: Dedicated Full-Width Gantt Chart with SVG Arrows & Multi-Scale Zoom */}
+              {/* CARD 2: Dedicated Full-Width Gantt Chart with SVG Arrows (Finish-to-Finish edge correction & Stat Holiday Legend) */}
               {activeTab === "gantt" && (
                 <div className="bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-sm">
                   <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-800 flex flex-wrap justify-between items-center gap-3 bg-slate-50/50 dark:bg-slate-900/50">
@@ -1454,10 +1501,12 @@
                         ))}
                       </div>
 
+                      {/* Explicit Legend including Stat Holidays */}
                       <div className="flex items-center gap-3 text-[11px] pl-2 border-l border-slate-300 dark:border-slate-700">
                         <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded bg-rose-500"></span> Critical</span>
                         <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded bg-brand-emerald"></span> Standard</span>
                         <span className="flex items-center gap-1.5"><span className="text-brand-emerald font-bold">◆</span> Milestone</span>
+                        <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded bg-amber-400"></span> Stat Holiday</span>
                       </div>
                     </div>
                   </div>
@@ -1471,9 +1520,9 @@
                             key={u.key}
                             style={{ width: `${u.widthPx}px` }}
                             className={`shrink-0 text-center py-1 border-r border-slate-200 dark:border-slate-800/60 ${
-                              u.isHoliday && showHolidays ? "bg-amber-500/10 text-amber-500 font-bold" : ""
+                              u.isHoliday && showHolidays ? "bg-amber-400/20 text-amber-500 dark:text-amber-400 font-bold border-b-2 border-amber-400" : ""
                             }`}
-                            title={u.holidayName ? `Holiday: ${u.holidayName}` : ""}
+                            title={u.holidayName ? `Stat Holiday: ${u.holidayName}` : ""}
                           >
                             <div className="text-[10px] font-medium">{u.label}</div>
                             <div className="text-[8px] opacity-70">{u.subLabel}</div>
@@ -1481,7 +1530,7 @@
                         ))}
                       </div>
 
-                      {/* SVG Canvas for Dependency Connector Arrows */}
+                      {/* SVG Canvas for Dependency Connector Arrows with Corrected FF Edge Coordinates */}
                       <svg
                         className="absolute inset-0 pointer-events-none"
                         style={{
@@ -1499,26 +1548,57 @@
                         </defs>
                         {cpmSchedule.tasks.map((succ, sIdx) => {
                           const sY = sIdx * 40 + 56;
-                          const sX = 240 + succ.es * pxPerDay;
                           return (succ.predecessors || []).map((pRef, pIdx) => {
                             const pIdxFound = cpmSchedule.tasks.findIndex(t => t.id === pRef.id);
                             if (pIdxFound < 0) return null;
                             const pred = cpmSchedule.tasks[pIdxFound];
                             const pY = pIdxFound * 40 + 56;
-                            const pX = 240 + (pred.itemType === "Milestone" ? pred.es * pxPerDay : pred.ef * pxPerDay);
                             const isCritLink = succ.isCritical && pred.isCritical;
-                            const midX = (pX + sX) / 2;
+                            const dep = pRef.type || "FS";
+
+                            // Correct PMI Connector Edge Calculations
+                            let pX, sX;
+                            if (dep === "FS") {
+                              pX = 240 + (pred.itemType === "Milestone" ? pred.es * pxPerDay : pred.ef * pxPerDay);
+                              sX = 240 + succ.es * pxPerDay;
+                            } else if (dep === "SS") {
+                              pX = 240 + pred.es * pxPerDay;
+                              sX = 240 + succ.es * pxPerDay;
+                            } else if (dep === "FF") {
+                              // Finish-to-Finish: Right edge of Pred to Right edge of Succ
+                              pX = 240 + (pred.itemType === "Milestone" ? pred.es * pxPerDay : pred.ef * pxPerDay);
+                              sX = 240 + (succ.itemType === "Milestone" ? succ.es * pxPerDay : succ.ef * pxPerDay);
+                            } else {
+                              // Start-to-Finish
+                              pX = 240 + pred.es * pxPerDay;
+                              sX = 240 + (succ.itemType === "Milestone" ? succ.es * pxPerDay : succ.ef * pxPerDay);
+                            }
+
+                            let pathD = "";
+                            if (dep === "FF") {
+                              // Loop out to the right and connect to the right edge
+                              const loopX = Math.max(pX, sX) + 24;
+                              pathD = `M ${pX} ${pY} L ${loopX} ${pY} L ${loopX} ${sY} L ${sX + 4} ${sY}`;
+                            } else if (dep === "SS") {
+                              // Loop out to the left
+                              const loopX = Math.min(pX, sX) - 20;
+                              pathD = `M ${pX} ${pY} L ${loopX} ${pY} L ${loopX} ${sY} L ${sX - 4} ${sY}`;
+                            } else {
+                              // Natural S-Curve for FS
+                              const midX = (pX + sX) / 2;
+                              pathD = `M ${pX} ${pY} C ${midX} ${pY}, ${midX} ${sY}, ${sX - 4} ${sY}`;
+                            }
 
                             return (
                               <path
                                 key={`${succ.id}-${pIdx}`}
-                                d={`M ${pX} ${pY} C ${midX} ${pY}, ${midX} ${sY}, ${sX - 4} ${sY}`}
+                                d={pathD}
                                 fill="none"
                                 stroke={isCritLink ? "#f43f5e" : "#10b981"}
                                 strokeWidth={isCritLink ? "2" : "1.5"}
-                                strokeDasharray={pRef.type === "FS" ? "" : "3,3"}
+                                strokeDasharray={dep === "FS" ? "" : "3,3"}
                                 markerEnd={isCritLink ? "url(#arrow-critical)" : "url(#arrow-normal)"}
-                                opacity="0.8"
+                                opacity="0.85"
                               />
                             );
                           });
@@ -1567,6 +1647,90 @@
                           );
                         })}
                       </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Resource Loading & Over-Allocation Heatmap Dashboard */}
+              {activeTab === "loading" && (
+                <div className="space-y-4">
+                  <div className="bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-sm">
+                    <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+                      <div>
+                        <h3 className="font-bold text-xs uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                          Cross-Project Resource Allocation & Loading Heatmap
+                        </h3>
+                        <p className="text-[11px] text-slate-500">
+                          Tracks total daily commitments across all programs. Red cells indicate over-allocation (&gt;100%).
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-3 text-[11px]">
+                        <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-emerald-500/20 border border-emerald-500 text-emerald-600 text-[9px] flex items-center justify-center font-bold">ok</span> Balanced (&le;100%)</span>
+                        <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-rose-500 text-white text-[9px] flex items-center justify-center font-bold">!</span> Over-allocated (&gt;100%)</span>
+                      </div>
+                    </div>
+
+                    <div className="overflow-x-auto">
+                      <table className="w-full border-collapse text-xs text-left">
+                        <thead>
+                          <tr className="border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 text-[10px] font-bold uppercase text-slate-500">
+                            <th className="px-4 py-3 min-w-[180px] sticky left-0 bg-slate-50 dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800">RESOURCE NAME</th>
+                            <th className="px-3 py-3 w-28 text-center border-r border-slate-200 dark:border-slate-800">STATUS</th>
+                            {timelineUnits.slice(0, 30).map(u => (
+                              <th key={u.key} className="px-1 py-3 text-center border-r border-slate-200 dark:border-slate-800/60 min-w-[42px]">
+                                <div>{u.label}</div>
+                                <div className="text-[8px] opacity-60">{u.subLabel}</div>
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+                          {(data.resources || []).map(res => {
+                            const load = resourceLoadingMap[res.name] || { totalOverAllocDays: 0, days: {} };
+                            const isOver = load.totalOverAllocDays > 0;
+                            return (
+                              <tr key={res.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
+                                <td className="px-4 py-3 sticky left-0 bg-white dark:bg-[#111827] border-r border-slate-200 dark:border-slate-800">
+                                  <div className="font-bold text-slate-900 dark:text-white">{res.name}</div>
+                                  <div className="text-[10px] text-slate-500">{res.role}</div>
+                                </td>
+                                <td className="px-3 py-3 text-center border-r border-slate-200 dark:border-slate-800">
+                                  {isOver ? (
+                                    <span className="px-2 py-0.5 rounded-full bg-rose-500/10 text-rose-500 font-bold text-[10px]">
+                                      {load.totalOverAllocDays}d Over
+                                    </span>
+                                  ) : (
+                                    <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-500 font-semibold text-[10px]">
+                                      Balanced
+                                    </span>
+                                  )}
+                                </td>
+                                {timelineUnits.slice(0, 30).map(u => {
+                                  const dayData = load.days[u.iso];
+                                  const alloc = dayData ? dayData.totalAlloc : 0;
+                                  const dayOver = alloc > 100;
+                                  return (
+                                    <td
+                                      key={u.key}
+                                      className={`px-1 py-2 text-center border-r border-slate-200 dark:border-slate-800/60 font-mono text-[10px] ${
+                                        alloc === 0
+                                          ? "text-slate-400 opacity-40"
+                                          : dayOver
+                                            ? "bg-rose-500 text-white font-bold"
+                                            : "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-semibold"
+                                      }`}
+                                      title={dayData ? `${res.name} on ${u.iso}: ${alloc}%\n` + dayData.tasks.map(t => `• [${t.wbs}] ${t.taskName} (${t.alloc}%)`).join("\n") : "Available"}
+                                    >
+                                      {alloc > 0 ? `${alloc}%` : "—"}
+                                    </td>
+                                  );
+                                })}
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
                     </div>
                   </div>
                 </div>
@@ -1850,6 +2014,103 @@
               )}
             </main>
           </div>
+
+          {/* Multiple Resource Assignment Modal */}
+          {assignModalTask && (
+            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+              <div className="bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-800 rounded-3xl p-6 w-full max-w-md space-y-4 shadow-2xl">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="font-bold text-base text-slate-900 dark:text-white">
+                      Assign Resources to {assignModalTask.wbs}
+                    </h3>
+                    <p className="text-xs text-slate-500 truncate">{assignModalTask.name}</p>
+                  </div>
+                  <button type="button" onClick={() => setAssignModalTask(null)} className="text-slate-400 hover:text-white">✕</button>
+                </div>
+
+                <div className="space-y-2.5 max-h-64 overflow-y-auto">
+                  {(assignModalTask.assignments || []).map((asgn, idx) => (
+                    <div key={idx} className="flex items-center gap-2 p-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+                      <select
+                        value={asgn.name}
+                        onChange={(e) => {
+                          const updated = [...assignModalTask.assignments];
+                          updated[idx].name = e.target.value;
+                          setAssignModalTask({ ...assignModalTask, assignments: updated });
+                        }}
+                        className="flex-1 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-2 py-1 text-xs"
+                      >
+                        {(data.resources || []).map(r => (
+                          <option key={r.id} value={r.name}>{r.name}</option>
+                        ))}
+                      </select>
+                      <div className="flex items-center gap-1">
+                        <input
+                          type="number"
+                          min="10"
+                          max="100"
+                          step="10"
+                          value={asgn.allocation}
+                          onChange={(e) => {
+                            const updated = [...assignModalTask.assignments];
+                            updated[idx].allocation = Number(e.target.value);
+                            setAssignModalTask({ ...assignModalTask, assignments: updated });
+                          }}
+                          className="w-16 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-2 py-1 text-xs font-mono text-center"
+                        />
+                        <span className="text-xs text-slate-500">%</span>
+                      </div>
+                      <button
+                        onClick={() => {
+                          const updated = assignModalTask.assignments.filter((_, i) => i !== idx);
+                          setAssignModalTask({ ...assignModalTask, assignments: updated });
+                        }}
+                        className="text-slate-400 hover:text-rose-500 font-bold px-1"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const existing = assignModalTask.assignments || [];
+                    const available = (data.resources || []).find(r => !existing.some(e => e.name === r.name)) || data.resources[0];
+                    setAssignModalTask({
+                      ...assignModalTask,
+                      assignments: [...existing, { name: available.name, allocation: 50 }]
+                    });
+                  }}
+                  className="w-full py-1.5 rounded-xl border border-dashed border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:text-brand-emerald text-xs font-semibold"
+                >
+                  + Add Another Resource
+                </button>
+
+                <div className="flex gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      updateTaskAssignments(assignModalTask.id, assignModalTask.assignments);
+                      setAssignModalTask(null);
+                    }}
+                    className="flex-1 py-2 rounded-xl bg-brand-emerald hover:bg-brand-emeraldHover text-brand-navy font-bold text-xs"
+                  >
+                    Save Assignments
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAssignModalTask(null)}
+                    className="px-4 py-2 rounded-xl bg-slate-200 dark:bg-slate-800 text-xs font-semibold"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Multiple Cross-Project Predecessor Linking Modal */}
           {multiDepModalTask && (
@@ -2219,7 +2480,7 @@
                         <th className="p-2 border border-slate-300 dark:border-slate-700">End Date</th>
                         <th className="p-2 border border-slate-300 dark:border-slate-700">Dur</th>
                         <th className="p-2 border border-slate-300 dark:border-slate-700">Float</th>
-                        <th className="p-2 border border-slate-300 dark:border-slate-700">Resource</th>
+                        <th className="p-2 border border-slate-300 dark:border-slate-700">Resources</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -2232,7 +2493,9 @@
                           <td className="p-2 border border-slate-300 dark:border-slate-700">{t.efDate}</td>
                           <td className="p-2 border border-slate-300 dark:border-slate-700">{t.duration}d</td>
                           <td className="p-2 border border-slate-300 dark:border-slate-700">{t.float}d</td>
-                          <td className="p-2 border border-slate-300 dark:border-slate-700">{t.resource || "Mustafa Nisar"} ({t.allocation}%)</td>
+                          <td className="p-2 border border-slate-300 dark:border-slate-700">
+                            {(t.assignments || []).map(a => `${a.name} (${a.allocation}%)`).join(", ") || t.resource}
+                          </td>
                         </tr>
                       ))}
                     </tbody>
