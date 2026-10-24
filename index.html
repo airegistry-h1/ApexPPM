@@ -12,7 +12,7 @@
   <!-- External App Configuration -->
   <script src="config.js"></script>
 
-  <!-- Branded SVG Icon (Matching AI Registry Hub Triangle & Circle) -->
+  <!-- Branded SVG Icon (Matching AI Registry Hub Logo) -->
   <script>
     (function() {
       const svgIcon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
@@ -91,7 +91,6 @@
   <script type="text/babel">
     const { useState, useEffect, useMemo, useRef } = React;
 
-    // Load credentials strictly from config.js (fallback to production DB)
     const DEFAULT_DB_URL = window.APEX_CONFIG?.DB_URL || "https://tzqbzzdctwdyvwvyvwzk.supabase.co";
     const DEFAULT_DB_ANON_KEY = window.APEX_CONFIG?.DB_ANON_KEY || "sb_publishable_Jve6BGkRJUrhkX8vMlDJUA_m_4RoWpT";
 
@@ -136,14 +135,15 @@
         { id: "prj-1", programId: "pgm-1", code: "PRJ-01", name: "Frontend Platform & PWA", methodology: "Hybrid Agile", baselineStart: TODAY_ISO }
       ],
       tasks: [],
-      risks: [],
+      risks: [
+        { id: "rsk-1", code: "RSK-01", title: "API Gateway Rate Limiting", category: "Technical", probability: 3, impact: 4, score: 12, strategy: "Mitigate", owner: "Mustafa Nisar", status: "Open" }
+      ],
       procurements: [
         { id: "po-1", poNumber: "PO-2026-001", vendor: "Cloudflare Inc.", category: "Hosting & Edge CDN", contractType: "FFP", committed: 240, actual: 200, status: "Awarded", terms: "Net 30", deliveryDate: addDaysISO(TODAY_ISO, 30) }
       ]
     };
 
     function App() {
-      // Theme State (Dark / Light)
       const [theme, setTheme] = useState(() => localStorage.getItem(THEME_KEY) || "dark");
 
       useEffect(() => {
@@ -155,18 +155,16 @@
 
       const toggleTheme = () => setTheme(prev => prev === "dark" ? "light" : "dark");
 
-      // Authentication State
       const [user, setUser] = useState(null);
       const [authEmail, setAuthEmail] = useState("");
       const [authPassword, setAuthPassword] = useState("");
       const [authMessage, setAuthMessage] = useState("");
       const [isAuthLoading, setIsAuthLoading] = useState(true);
 
-      // Cloud DB Sync State
       const [syncStatus, setSyncStatus] = useState("Initializing DB...");
       const [lastSyncedAt, setLastSyncedAt] = useState(null);
 
-      // CRITICAL GUARDS: Strictly prevent blank state overwrites on initial load
+      // Startup lock to prevent accidental overwrites
       const isInitialCloudLoadComplete = useRef(false);
       const isPullingRef = useRef(false);
 
@@ -181,7 +179,7 @@
 
       const [data, setData] = useState(INITIAL_EMPTY_WORKSPACE);
 
-      // Navigation & Active Filters
+      // Filters
       const [selectedProgramId, setSelectedProgramId] = useState("ALL");
       const [selectedProjectId, setSelectedProjectId] = useState("ALL");
       const [activeTab, setActiveTab] = useState("gantt");
@@ -189,10 +187,11 @@
       // Modals
       const [showManageModal, setShowManageModal] = useState(false);
       const [showReportModal, setShowReportModal] = useState(false);
+      const [multiDepModalTask, setMultiDepModalTask] = useState(null);
 
       // Program/Project CRUD Form State
       const [manageAction, setManageAction] = useState("create");
-      const [manageType, setManageType] = useState("program");
+      const [manageType, setManageType] = useState("project");
       const [targetEntityId, setTargetEntityId] = useState("");
       const [editCode, setEditCode] = useState("");
       const [editName, setEditName] = useState("");
@@ -201,19 +200,28 @@
       const [editMethodology, setEditMethodology] = useState("Hybrid Agile");
       const [editParentPgmId, setEditParentPgmId] = useState("");
 
-      // Quick-Add inputs
+      // Quick-Add Inputs
+      const [qaType, setQaType] = useState("Task"); // "Task" | "Milestone"
       const [qaWbs, setQaWbs] = useState("");
       const [qaName, setQaName] = useState("");
       const [qaStartDate, setQaStartDate] = useState(TODAY_ISO);
       const [qaDuration, setQaDuration] = useState(5);
-      const [qaEndDate, setQaEndDate] = useState(addDaysISO(TODAY_ISO, 5));
-      const [qaPred, setQaPred] = useState("");
-      const [qaDepType, setQaDepType] = useState("FS");
-      const [qaLag, setQaLag] = useState(0);
       const [qaResource, setQaResource] = useState("Mustafa Nisar");
       const [qaAllocation, setQaAllocation] = useState(100);
 
-      // Procurement Form State
+      // Risk Register Quick Add State
+      const [newRisk, setNewRisk] = useState({
+        code: `RSK-0${(data?.risks?.length || 0) + 1}`,
+        title: "",
+        category: "Technical",
+        probability: 3,
+        impact: 3,
+        strategy: "Mitigate",
+        owner: "Mustafa Nisar",
+        status: "Open"
+      });
+
+      // Procurement Quick Add State
       const [newPO, setNewPO] = useState({
         poNumber: `PO-${new Date().getFullYear()}-${String(Math.floor(Math.random() * 900) + 100)}`,
         vendor: "",
@@ -226,7 +234,7 @@
         deliveryDate: addDaysISO(TODAY_ISO, 14)
       });
 
-      // DB Auth Session
+      // Auth Session Listener
       useEffect(() => {
         if (!dbClient) {
           setIsAuthLoading(false);
@@ -243,7 +251,7 @@
         return () => subscription.unsubscribe();
       }, [dbClient]);
 
-      // Pull workspace from Cloud DB
+      // Pull from Cloud DB
       const pullWorkspace = async (activeUser) => {
         if (!dbClient || !activeUser) return;
         try {
@@ -258,7 +266,17 @@
           if (error) throw error;
 
           if (row && row.state && row.state.programs) {
-            setData(row.state);
+            // Upgrade legacy items lacking predecessors array or itemType
+            const sanitizedState = {
+              ...row.state,
+              risks: row.state.risks || INITIAL_EMPTY_WORKSPACE.risks,
+              tasks: (row.state.tasks || []).map(t => ({
+                ...t,
+                itemType: t.itemType || (Number(t.duration) === 0 ? "Milestone" : "Task"),
+                predecessors: t.predecessors || (t.predecessorId ? [{ id: t.predecessorId, type: t.depType || "FS", lag: Number(t.lag || 0) }] : [])
+              }))
+            };
+            setData(sanitizedState);
             setLastSyncedAt(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
             setSyncStatus("Cloud DB Synced");
           } else {
@@ -273,7 +291,7 @@
         }
       };
 
-      // Push workspace to Cloud DB
+      // Push to Cloud DB
       const pushWorkspace = async (stateToSave, activeUser) => {
         if (!dbClient || !activeUser || !isInitialCloudLoadComplete.current) return;
         try {
@@ -316,7 +334,7 @@
           if (mode === "magic") {
             const { error } = await dbClient.auth.signInWithOtp({ email: authEmail });
             if (error) throw error;
-            setAuthMessage("Magic link sent to your inbox!");
+            setAuthMessage("Magic link sent!");
           } else if (mode === "signup") {
             const { error } = await dbClient.auth.signUp({ email: authEmail, password: authPassword });
             if (error) throw error;
@@ -331,6 +349,7 @@
         }
       };
 
+      // Hierarchical filtering
       const programProjects = useMemo(() => {
         if (selectedProgramId === "ALL") return data.projects;
         return data.projects.filter(p => p.programId === selectedProgramId);
@@ -349,45 +368,54 @@
         });
       }, [data.tasks, selectedProjectId, selectedProgramId, programProjects]);
 
-      // PMI Critical Path Method Engine with Automatic Date Cascading
+      // Multi-Predecessor PMI Forward/Backward Pass CPM Engine
       const cpmSchedule = useMemo(() => {
         if (visibleTasks.length === 0) {
-          return { tasks: [], anchorDate: TODAY_ISO, totalSpanDays: 30, criticalCount: 0 };
+          return { tasks: [], anchorDate: TODAY_ISO, totalSpanDays: 30, criticalCount: 0, rawMap: {} };
         }
 
         const taskMap = {};
         data.tasks.forEach(t => {
+          const isMilestone = t.itemType === "Milestone" || Number(t.duration) === 0;
+          const dur = isMilestone ? 0 : Math.max(1, Number(t.duration || 1));
           taskMap[t.id] = {
             ...t,
-            duration: Math.max(1, Number(t.duration || 1)),
+            itemType: isMilestone ? "Milestone" : (t.itemType || "Task"),
+            duration: dur,
             allocation: Number(t.allocation || 100),
-            lag: Number(t.lag || 0),
+            predecessors: t.predecessors || (t.predecessorId ? [{ id: t.predecessorId, type: t.depType || "FS", lag: Number(t.lag || 0) }] : []),
             esDate: t.startDate || TODAY_ISO,
-            efDate: t.endDate || addDaysISO(t.startDate || TODAY_ISO, t.duration || 1)
+            efDate: t.endDate || (isMilestone ? (t.startDate || TODAY_ISO) : addDaysISO(t.startDate || TODAY_ISO, dur))
           };
         });
 
-        // Forward Pass: Cascading dependencies
+        // Forward Pass: Most constraining predecessor
         let changed = true;
         let passes = 0;
-        while (changed && passes < 25) {
+        while (changed && passes < 30) {
           changed = false;
           passes++;
           Object.values(taskMap).forEach(t => {
-            if (t.predecessorId && taskMap[t.predecessorId]) {
-              const pred = taskMap[t.predecessorId];
-              const dep = t.depType || "FS";
-              const lag = Number(t.lag || 0);
-              let requiredStart = t.esDate;
+            if (t.predecessors && t.predecessors.length > 0) {
+              let latestReqStart = t.esDate;
+              t.predecessors.forEach(predRef => {
+                const pred = taskMap[predRef.id];
+                if (!pred) return;
+                const dep = predRef.type || "FS";
+                const lag = Number(predRef.lag || 0);
+                let candidateStart = t.esDate;
 
-              if (dep === "FS") requiredStart = addDaysISO(pred.efDate, lag);
-              else if (dep === "SS") requiredStart = addDaysISO(pred.esDate, lag);
-              else if (dep === "FF") requiredStart = addDaysISO(addDaysISO(pred.efDate, lag), -t.duration);
-              else if (dep === "SF") requiredStart = addDaysISO(addDaysISO(pred.esDate, lag), -t.duration);
+                if (dep === "FS") candidateStart = addDaysISO(pred.efDate, lag);
+                else if (dep === "SS") candidateStart = addDaysISO(pred.esDate, lag);
+                else if (dep === "FF") candidateStart = addDaysISO(addDaysISO(pred.efDate, lag), -t.duration);
+                else if (dep === "SF") candidateStart = addDaysISO(addDaysISO(pred.esDate, lag), -t.duration);
 
-              if (requiredStart !== t.esDate) {
-                t.esDate = requiredStart;
-                t.efDate = addDaysISO(requiredStart, t.duration);
+                if (candidateStart > latestReqStart) latestReqStart = candidateStart;
+              });
+
+              if (latestReqStart !== t.esDate) {
+                t.esDate = latestReqStart;
+                t.efDate = t.itemType === "Milestone" ? latestReqStart : addDaysISO(latestReqStart, t.duration);
                 changed = true;
               }
             }
@@ -402,23 +430,26 @@
           t.ef = t.es + t.duration;
         });
 
-        // Backward Pass: Float & Critical Path
+        // Backward Pass
         const maxEF = Math.max(...visibleNodes.map(n => n.ef), 1);
         visibleNodes.forEach(n => { n.lf = maxEF; n.ls = n.lf - n.duration; });
 
         for (let i = 0; i < visibleNodes.length + 2; i++) {
           visibleNodes.forEach(n => {
-            const successors = visibleNodes.filter(s => s.predecessorId === n.id);
+            const successors = visibleNodes.filter(s => s.predecessors?.some(p => p.id === n.id));
             if (successors.length > 0) {
               let minLF = maxEF;
               successors.forEach(succ => {
-                const lag = Number(succ.lag || 0);
-                const dep = succ.depType || "FS";
+                const rel = succ.predecessors.find(p => p.id === n.id);
+                const lag = Number(rel?.lag || 0);
+                const dep = rel?.type || "FS";
                 let reqLF = maxEF;
+
                 if (dep === "FS") reqLF = succ.ls - lag;
                 else if (dep === "SS") reqLF = succ.ls - lag + n.duration;
                 else if (dep === "FF") reqLF = succ.lf - lag;
                 else if (dep === "SF") reqLF = succ.lf - lag + n.duration;
+
                 if (reqLF < minLF) minLF = reqLF;
               });
               n.lf = minLF;
@@ -436,7 +467,8 @@
           tasks: visibleNodes,
           anchorDate: earliestISO,
           totalSpanDays: Math.max(30, maxEF + 6),
-          criticalCount: visibleNodes.filter(n => n.isCritical).length
+          criticalCount: visibleNodes.filter(n => n.isCritical).length,
+          rawMap: taskMap
         };
       }, [visibleTasks, data.tasks]);
 
@@ -447,13 +479,27 @@
         });
       }, [cpmSchedule.anchorDate, cpmSchedule.totalSpanDays]);
 
-      // Effort-Driven Scheduling: Adjust duration based on allocation %
+      // Reordering Handlers (Move 1.1 into 1.2 or 1.3)
+      const moveTaskOrder = (taskId, direction) => {
+        const index = data.tasks.findIndex(t => t.id === taskId);
+        if (index < 0) return;
+        const targetIndex = direction === "up" ? index - 1 : index + 1;
+        if (targetIndex < 0 || targetIndex >= data.tasks.length) return;
+
+        const updated = [...data.tasks];
+        const [moved] = updated.splice(index, 1);
+        updated.splice(targetIndex, 0, moved);
+
+        setData(prev => ({ ...prev, tasks: updated }));
+      };
+
+      // Effort-Driven Allocation Handler
       const handleAllocationChange = (taskId, newAlloc) => {
         const alloc = Math.max(10, Math.min(200, Number(newAlloc || 100)));
         setData(prev => ({
           ...prev,
           tasks: prev.tasks.map(t => {
-            if (t.id !== taskId) return t;
+            if (t.id !== taskId || t.itemType === "Milestone") return t;
             const baseWork = Math.max(1, Number(t.duration || 1) * (Number(t.allocation || 100) / 100));
             const newDuration = Math.max(1, Math.round(baseWork / (alloc / 100)));
             const newEnd = addDaysISO(t.startDate || TODAY_ISO, newDuration);
@@ -462,60 +508,56 @@
         }));
       };
 
-      // Task CRUD: Create
-      const handleAddTask = (e) => {
+      // Item CRUD
+      const handleAddItem = (e) => {
         e.preventDefault();
         if (!qaName.trim()) return;
         const targetPrjId = selectedProjectId !== "ALL" ? selectedProjectId : (programProjects[0]?.id || data.projects[0]?.id);
-        const newTask = {
+        const isMilestone = qaType === "Milestone";
+        const dur = isMilestone ? 0 : Math.max(1, Number(qaDuration || 1));
+        const newItem = {
           id: "tsk-" + Date.now(),
           projectId: targetPrjId,
+          itemType: qaType,
           wbs: qaWbs.trim() || `1.${visibleTasks.length + 1}`,
           name: qaName.trim(),
           startDate: qaStartDate || TODAY_ISO,
-          endDate: qaEndDate || addDaysISO(qaStartDate || TODAY_ISO, qaDuration),
-          duration: Math.max(1, Number(qaDuration || 1)),
-          predecessorId: qaPred,
-          depType: qaDepType,
-          lag: Number(qaLag || 0),
+          endDate: isMilestone ? (qaStartDate || TODAY_ISO) : addDaysISO(qaStartDate || TODAY_ISO, dur),
+          duration: dur,
+          predecessors: [],
           resource: qaResource,
           allocation: Number(qaAllocation || 100),
           status: "To Do",
           done: false,
-          pv: 5000,
+          pv: isMilestone ? 0 : 5000,
           ac: 0
         };
 
-        if (newTask.predecessorId) {
-          const pred = data.tasks.find(t => t.id === newTask.predecessorId);
-          if (pred && newTask.depType === "FS") {
-            newTask.startDate = addDaysISO(pred.endDate || TODAY_ISO, newTask.lag);
-            newTask.endDate = addDaysISO(newTask.startDate, newTask.duration);
-          }
-        }
-
-        setData(prev => ({ ...prev, tasks: [...prev.tasks, newTask] }));
+        setData(prev => ({ ...prev, tasks: [...prev.tasks, newItem] }));
         setQaName("");
         setQaWbs("");
       };
 
-      // Task CRUD: Update
       const updateTaskField = (taskId, field, value) => {
         setData(prev => ({
           ...prev,
           tasks: prev.tasks.map(t => {
             if (t.id !== taskId) return t;
             const updated = { ...t, [field]: value };
-            if (field === "startDate") {
-              updated.endDate = addDaysISO(value, updated.duration);
+            if (field === "itemType" && value === "Milestone") {
+              updated.duration = 0;
+              updated.endDate = updated.startDate;
+            } else if (field === "startDate") {
+              updated.endDate = updated.itemType === "Milestone" ? value : addDaysISO(value, updated.duration);
             } else if (field === "duration") {
-              const d = Math.max(1, Number(value || 1));
+              const d = Math.max(0, Number(value || 0));
               updated.duration = d;
+              if (d === 0) updated.itemType = "Milestone";
               updated.endDate = addDaysISO(updated.startDate || TODAY_ISO, d);
             } else if (field === "endDate") {
               const diff = diffDaysISO(updated.startDate || TODAY_ISO, value);
-              if (diff >= 1) updated.duration = diff;
-              else { updated.startDate = addDaysISO(value, -1); updated.duration = 1; }
+              if (diff >= 0) updated.duration = diff;
+              if (diff === 0) updated.itemType = "Milestone";
             } else if (field === "done") {
               updated.status = value ? "Done" : "In Progress";
             }
@@ -524,18 +566,44 @@
         }));
       };
 
-      // Task CRUD: Delete
       const deleteTask = (taskId) => {
-        if (!confirm("Are you sure you want to delete this deliverable?")) return;
+        if (!confirm("Delete this deliverable?")) return;
         setData(prev => ({
           ...prev,
           tasks: prev.tasks
             .filter(t => t.id !== taskId)
-            .map(t => t.predecessorId === taskId ? { ...t, predecessorId: "" } : t)
+            .map(t => ({
+              ...t,
+              predecessors: (t.predecessors || []).filter(p => p.id !== taskId)
+            }))
         }));
       };
 
-      // Program/Project CRUD: Create & Update
+      // Add/Remove Multiple Predecessors
+      const addPredecessor = (taskId, predId, type = "FS", lag = 0) => {
+        if (!predId || predId === taskId) return;
+        setData(prev => ({
+          ...prev,
+          tasks: prev.tasks.map(t => {
+            if (t.id !== taskId) return t;
+            const existing = t.predecessors || [];
+            if (existing.some(p => p.id === predId)) return t;
+            return { ...t, predecessors: [...existing, { id: predId, type, lag: Number(lag || 0) }] };
+          })
+        }));
+      };
+
+      const removePredecessor = (taskId, predId) => {
+        setData(prev => ({
+          ...prev,
+          tasks: prev.tasks.map(t => {
+            if (t.id !== taskId) return t;
+            return { ...t, predecessors: (t.predecessors || []).filter(p => p.id !== predId) };
+          })
+        }));
+      };
+
+      // Program & Project CRUD Handlers
       const handleProgramProjectSubmit = (e) => {
         e.preventDefault();
         if (!editName.trim()) return;
@@ -572,21 +640,14 @@
             setData(prev => ({
               ...prev,
               programs: prev.programs.map(p => p.id === targetEntityId ? {
-                ...p,
-                code: editCode,
-                name: editName,
-                manager: editManager,
-                budget: Number(editBudget || 0)
+                ...p, code: editCode, name: editName, manager: editManager, budget: Number(editBudget || 0)
               } : p)
             }));
           } else {
             setData(prev => ({
               ...prev,
               projects: prev.projects.map(p => p.id === targetEntityId ? {
-                ...p,
-                code: editCode,
-                name: editName,
-                methodology: editMethodology
+                ...p, code: editCode, name: editName, methodology: editMethodology
               } : p)
             }));
           }
@@ -594,37 +655,59 @@
         setShowManageModal(false);
       };
 
-      // Program CRUD: Delete
       const deleteProgram = (pgmId) => {
         if (data.programs.length <= 1) {
-          alert("Cannot delete the only remaining program. Create another program first.");
+          alert("Cannot delete the only remaining program.");
           return;
         }
-        if (!confirm("Are you sure? Deleting this program will remove all linked projects and tasks!")) return;
-        const projectIdsToRemove = data.projects.filter(p => p.programId === pgmId).map(p => p.id);
+        if (!confirm("Are you sure? This will delete all child projects and tasks.")) return;
+        const prjIds = data.projects.filter(p => p.programId === pgmId).map(p => p.id);
         setData(prev => ({
           ...prev,
           programs: prev.programs.filter(p => p.id !== pgmId),
           projects: prev.projects.filter(p => p.programId !== pgmId),
-          tasks: prev.tasks.filter(t => !projectIdsToRemove.includes(t.projectId))
+          tasks: prev.tasks.filter(t => !prjIds.includes(t.projectId))
         }));
         setSelectedProgramId("ALL");
-        setSelectedProjectId("ALL");
       };
 
-      // Project CRUD: Delete
       const deleteProject = (prjId) => {
         if (data.projects.length <= 1) {
-          alert("Cannot delete the only remaining project. Create another project first.");
+          alert("Cannot delete the only remaining project.");
           return;
         }
-        if (!confirm("Are you sure? Deleting this project will remove all its deliverables!")) return;
+        if (!confirm("Delete project and its tasks?")) return;
         setData(prev => ({
           ...prev,
           projects: prev.projects.filter(p => p.id !== prjId),
           tasks: prev.tasks.filter(t => t.projectId !== prjId)
         }));
         setSelectedProjectId("ALL");
+      };
+
+      // Risk Log CRUD Handlers
+      const handleAddRisk = (e) => {
+        e.preventDefault();
+        if (!newRisk.title.trim()) return;
+        const score = Number(newRisk.probability) * Number(newRisk.impact);
+        setData(prev => ({
+          ...prev,
+          risks: [...(prev.risks || []), { ...newRisk, score, id: "rsk-" + Date.now() }]
+        }));
+        setNewRisk({
+          code: `RSK-0${(data?.risks?.length || 0) + 2}`,
+          title: "",
+          category: "Technical",
+          probability: 3,
+          impact: 3,
+          strategy: "Mitigate",
+          owner: "Mustafa Nisar",
+          status: "Open"
+        });
+      };
+
+      const deleteRisk = (id) => {
+        setData(prev => ({ ...prev, risks: prev.risks.filter(r => r.id !== id) }));
       };
 
       // Procurement Handlers
@@ -656,14 +739,9 @@
       };
 
       const deletePO = (id) => {
-        if (!confirm("Delete this PO record?")) return;
-        setData(prev => ({
-          ...prev,
-          procurements: prev.procurements.filter(p => p.id !== id)
-        }));
+        setData(prev => ({ ...prev, procurements: prev.procurements.filter(p => p.id !== id) }));
       };
 
-      // Export for Google Docs
       const copyReportToClipboard = () => {
         const reportElement = document.getElementById("executive-report-content");
         if (!reportElement) return;
@@ -672,7 +750,7 @@
         const textBlob = new Blob([reportElement.innerText], { type: "text/plain" });
         navigator.clipboard.write([
           new ClipboardItem({ "text/html": blob, "text/plain": textBlob })
-        ]).then(() => alert("Executive Report copied! You can now paste directly into Google Docs."));
+        ]).then(() => alert("Executive Report copied! You can paste directly into Google Docs."));
       };
 
       if (isAuthLoading) {
@@ -698,7 +776,7 @@
               </div>
 
               <div className="text-xs text-slate-400 leading-relaxed">
-                Welcome to your multi-tenant PPM suite. Critical Path Method (CPM), multi-project dependency cascading, and procurement controls powered by your secure DB.
+                Welcome to your multi-tenant PPM suite. Full CPM dependency arrows, milestone scheduling, RAID logs, and procurement controls powered by your secure DB.
               </div>
 
               <div className="space-y-3 pt-2">
@@ -746,7 +824,7 @@
 
       return (
         <div className="min-h-screen flex flex-col transition-colors duration-200">
-          {/* Header Bar */}
+          {/* Header */}
           <header className="border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-[#111827] px-4 md:px-6 py-3 flex flex-wrap items-center justify-between gap-3 shadow-sm no-print">
             <div className="flex items-center gap-3">
               <div className="w-9 h-9 rounded-xl bg-brand-navy border border-brand-emerald flex items-center justify-center font-bold text-base shadow">
@@ -769,7 +847,7 @@
               <select
                 value={selectedProgramId}
                 onChange={(e) => setSelectedProgramId(e.target.value)}
-                className="bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 dark:text-slate-200"
+                className="bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 dark:text-slate-200 font-medium"
               >
                 <option value="ALL">All Programs ({data.programs.length})</option>
                 {data.programs.map((p) => (
@@ -780,7 +858,7 @@
               <select
                 value={selectedProjectId}
                 onChange={(e) => setSelectedProjectId(e.target.value)}
-                className="bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 dark:text-slate-200"
+                className="bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 dark:text-slate-200 font-medium"
               >
                 <option value="ALL">All Projects ({programProjects.length})</option>
                 {programProjects.map((p) => (
@@ -827,13 +905,14 @@
           </header>
 
           <div className="flex-1 flex overflow-hidden">
+            {/* Sidebar */}
             <aside className="hidden md:flex w-64 border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-[#0f172a] p-4 flex-col justify-between shrink-0 no-print">
               <div className="space-y-1.5">
                 {[
                   { id: "gantt", label: "Gantt & CPM Engine", badge: `${cpmSchedule.criticalCount} CP` },
                   { id: "tasks", label: "Tasks & Effort Board", badge: visibleTasks.length },
-                  { id: "procurement", label: "Procurement & POs", badge: data.procurements.length },
-                  { id: "risks", label: "Risk Register (RAID)", badge: data.risks.length }
+                  { id: "risks", label: "Risk Register (RAID)", badge: (data.risks || []).length },
+                  { id: "procurement", label: "Procurement & POs", badge: data.procurements.length }
                 ].map((item) => (
                   <button
                     key={item.id}
@@ -862,13 +941,25 @@
               </div>
             </aside>
 
+            {/* Main Content Area */}
             <main className="flex-1 p-4 md:p-6 overflow-y-auto space-y-5 bg-slate-50/50 dark:bg-[#0b1120]">
-              {/* Task Quick-Add Bar */}
+              {/* Deliverables Quick-Add Bar */}
               {activeTab === "gantt" && (
                 <form
-                  onSubmit={handleAddTask}
+                  onSubmit={handleAddItem}
                   className="bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-sm flex flex-wrap items-end gap-2.5 no-print"
                 >
+                  <div className="w-24">
+                    <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">Type</label>
+                    <select
+                      value={qaType}
+                      onChange={(e) => setQaType(e.target.value)}
+                      className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-2 py-1.5 text-xs text-slate-900 dark:text-white font-semibold"
+                    >
+                      <option value="Task">Task</option>
+                      <option value="Milestone">◆ Milestone</option>
+                    </select>
+                  </div>
                   <div className="w-16">
                     <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">WBS</label>
                     <input
@@ -880,12 +971,12 @@
                     />
                   </div>
                   <div className="flex-1 min-w-[200px]">
-                    <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">Task Deliverable</label>
+                    <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">Item Title</label>
                     <input
                       type="text"
                       value={qaName}
                       onChange={(e) => setQaName(e.target.value)}
-                      placeholder="Add high-impact deliverable..."
+                      placeholder={qaType === "Milestone" ? "Key Stage Gate / Signoff..." : "Deliverable name..."}
                       className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-900 dark:text-white"
                     />
                   </div>
@@ -894,57 +985,22 @@
                     <input
                       type="date"
                       value={qaStartDate}
-                      onChange={(e) => {
-                        setQaStartDate(e.target.value);
-                        setQaEndDate(addDaysISO(e.target.value, qaDuration));
-                      }}
+                      onChange={(e) => setQaStartDate(e.target.value)}
                       className="bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-2 py-1.5 text-xs text-slate-900 dark:text-white"
                     />
                   </div>
-                  <div className="w-16">
-                    <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">Days</label>
-                    <input
-                      type="number"
-                      min="1"
-                      value={qaDuration}
-                      onChange={(e) => {
-                        const d = Math.max(1, Number(e.target.value || 1));
-                        setQaDuration(d);
-                        setQaEndDate(addDaysISO(qaStartDate, d));
-                      }}
-                      className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-2 py-1.5 text-xs text-slate-900 dark:text-white"
-                    />
-                  </div>
-                  <div className="min-w-[150px]">
-                    <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">Predecessor (Cross-Project)</label>
-                    <select
-                      value={qaPred}
-                      onChange={(e) => setQaPred(e.target.value)}
-                      className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-2 py-1.5 text-xs text-slate-900 dark:text-white"
-                    >
-                      <option value="">None</option>
-                      {data.projects.map(prj => (
-                        <optgroup key={prj.id} label={`${prj.code}: ${prj.name}`}>
-                          {data.tasks.filter(t => t.projectId === prj.id).map(t => (
-                            <option key={t.id} value={t.id}>{t.wbs} {t.name}</option>
-                          ))}
-                        </optgroup>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="w-16">
-                    <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">Type</label>
-                    <select
-                      value={qaDepType}
-                      onChange={(e) => setQaDepType(e.target.value)}
-                      className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-1.5 py-1.5 text-xs text-slate-900 dark:text-white font-mono"
-                    >
-                      <option value="FS">FS</option>
-                      <option value="SS">SS</option>
-                      <option value="FF">FF</option>
-                      <option value="SF">SF</option>
-                    </select>
-                  </div>
+                  {qaType !== "Milestone" && (
+                    <div className="w-16">
+                      <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">Days</label>
+                      <input
+                        type="number"
+                        min="1"
+                        value={qaDuration}
+                        onChange={(e) => setQaDuration(Math.max(1, Number(e.target.value || 1)))}
+                        className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-2 py-1.5 text-xs text-slate-900 dark:text-white"
+                      />
+                    </div>
+                  )}
                   <div className="w-24">
                     <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">Alloc %</label>
                     <input
@@ -961,56 +1017,72 @@
                     type="submit"
                     className="bg-brand-emerald hover:bg-brand-emeraldHover text-brand-navy font-bold text-xs px-4 py-2 rounded-lg transition"
                   >
-                    Add Task
+                    Add {qaType}
                   </button>
                 </form>
               )}
 
-              {/* Gantt & CPM Schedule Table View with INLINE Predecessor & Dependency Controls */}
+              {/* CARD 1: Deliverables Table Grid (Top Section) */}
               {activeTab === "gantt" && (
                 <div className="bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-sm">
+                  <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-800 flex justify-between items-center bg-slate-50/50 dark:bg-slate-900/50">
+                    <h3 className="font-bold text-xs uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                      Deliverables, WBS & Multi-Dependency Register
+                    </h3>
+                    <div className="text-[11px] text-slate-500">
+                      Showing {cpmSchedule.tasks.length} items • Reorder via ▲ / ▼
+                    </div>
+                  </div>
                   <div className="overflow-x-auto">
-                    <table className="w-full border-collapse text-left">
+                    <table className="w-full border-collapse text-left text-xs">
                       <thead>
                         <tr className="border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/90 text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                          <th className="w-12 px-2 py-3 text-center border-r border-slate-200 dark:border-slate-800">ORDER</th>
                           <th className="w-10 px-2 py-3 text-center border-r border-slate-200 dark:border-slate-800">DONE</th>
-                          <th className="w-14 px-2 py-3 border-r border-slate-200 dark:border-slate-800">WBS</th>
-                          <th className="min-w-[170px] px-3 py-3 border-r border-slate-200 dark:border-slate-800">DELIVERABLE</th>
-                          <th className="min-w-[140px] px-2 py-3 border-r border-slate-200 dark:border-slate-800">PREDECESSOR</th>
-                          <th className="w-16 px-2 py-3 border-r border-slate-200 dark:border-slate-800 text-center">TYPE</th>
-                          <th className="min-w-[105px] px-2 py-3 border-r border-slate-200 dark:border-slate-800">START</th>
-                          <th className="min-w-[105px] px-2 py-3 border-r border-slate-200 dark:border-slate-800">END</th>
+                          <th className="w-16 px-2 py-3 border-r border-slate-200 dark:border-slate-800">WBS</th>
+                          <th className="w-24 px-2 py-3 border-r border-slate-200 dark:border-slate-800">TYPE</th>
+                          <th className="min-w-[200px] px-3 py-3 border-r border-slate-200 dark:border-slate-800">DELIVERABLE</th>
+                          <th className="min-w-[180px] px-3 py-3 border-r border-slate-200 dark:border-slate-800">PREDECESSORS</th>
+                          <th className="min-w-[110px] px-2 py-3 border-r border-slate-200 dark:border-slate-800">START</th>
+                          <th className="min-w-[110px] px-2 py-3 border-r border-slate-200 dark:border-slate-800">END</th>
                           <th className="w-12 px-1 py-3 text-center border-r border-slate-200 dark:border-slate-800">DUR</th>
                           <th className="min-w-[130px] px-2 py-3 border-r border-slate-200 dark:border-slate-800">RESOURCE & EFFORT</th>
                           <th className="w-16 px-1 py-3 text-center border-r border-slate-200 dark:border-slate-800">FLOAT</th>
-                          <th className="w-10 px-1 py-3 text-center border-r border-slate-200 dark:border-slate-800">DEL</th>
-                          <th className="p-0">
-                            <div className="flex">
-                              {timelineDays.map((d) => (
-                                <div
-                                  key={d.index}
-                                  className={`w-12 shrink-0 py-2 text-center border-r border-slate-200 dark:border-slate-800/70 ${
-                                    d.iso === TODAY_ISO ? "bg-emerald-500/20 text-emerald-600 dark:text-emerald-300 font-bold" : ""
-                                  }`}
-                                >
-                                  <div className="text-[10px]">D{d.index}</div>
-                                  <div className="text-[8px] opacity-70">{d.label}</div>
-                                </div>
-                              ))}
-                            </div>
-                          </th>
+                          <th className="w-10 px-1 py-3 text-center">DEL</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-slate-200 dark:divide-slate-800 text-xs">
+                      <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
                         {cpmSchedule.tasks.length === 0 ? (
                           <tr>
-                            <td colSpan="12" className="text-center py-10 text-slate-400 text-xs">
-                              No tasks in this view. Use the quick-add bar above to define your deliverables!
+                            <td colSpan="12" className="text-center py-8 text-slate-400 text-xs">
+                              No deliverables found. Add a task or milestone above!
                             </td>
                           </tr>
                         ) : (
-                          cpmSchedule.tasks.map((t) => (
+                          cpmSchedule.tasks.map((t, idx) => (
                             <tr key={t.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
+                              {/* Order Buttons */}
+                              <td className="px-1 py-2 text-center border-r border-slate-200 dark:border-slate-800">
+                                <div className="flex items-center justify-center gap-0.5">
+                                  <button
+                                    onClick={() => moveTaskOrder(t.id, "up")}
+                                    disabled={idx === 0}
+                                    className="p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-30 text-[10px]"
+                                    title="Move Up"
+                                  >
+                                    ▲
+                                  </button>
+                                  <button
+                                    onClick={() => moveTaskOrder(t.id, "down")}
+                                    disabled={idx === cpmSchedule.tasks.length - 1}
+                                    className="p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-30 text-[10px]"
+                                    title="Move Down"
+                                  >
+                                    ▼
+                                  </button>
+                                </div>
+                              </td>
+
                               <td className="px-2 py-2 text-center border-r border-slate-200 dark:border-slate-800">
                                 <input
                                   type="checkbox"
@@ -1019,43 +1091,57 @@
                                   className="w-4 h-4 rounded accent-brand-emerald cursor-pointer"
                                 />
                               </td>
+
                               <td className="px-2 py-2 border-r border-slate-200 dark:border-slate-800 font-mono text-[11px]">
-                                {t.wbs}
+                                <input
+                                  type="text"
+                                  value={t.wbs}
+                                  onChange={(e) => updateTaskField(t.id, "wbs", e.target.value)}
+                                  className="w-12 bg-transparent border-b border-transparent hover:border-slate-400 focus:border-brand-emerald outline-none"
+                                />
                               </td>
+
+                              {/* Item Type (Milestone vs Task) */}
+                              <td className="px-2 py-1.5 border-r border-slate-200 dark:border-slate-800">
+                                <select
+                                  value={t.itemType || "Task"}
+                                  onChange={(e) => updateTaskField(t.id, "itemType", e.target.value)}
+                                  className="bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded px-1.5 py-0.5 text-[10px] font-semibold"
+                                >
+                                  <option value="Task">Task</option>
+                                  <option value="Milestone">◆ Milestone</option>
+                                </select>
+                              </td>
+
                               <td className="px-3 py-2 border-r border-slate-200 dark:border-slate-800 font-medium text-slate-900 dark:text-white">
+                                {t.itemType === "Milestone" && <span className="text-brand-emerald mr-1.5">◆</span>}
                                 {t.name}
                               </td>
 
-                              {/* INLINE PREDECESSOR SELECTOR */}
+                              {/* Multi-Predecessor Tags & Management */}
                               <td className="px-2 py-1.5 border-r border-slate-200 dark:border-slate-800">
-                                <select
-                                  value={t.predecessorId || ""}
-                                  onChange={(e) => updateTaskField(t.id, "predecessorId", e.target.value)}
-                                  className="w-full bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded px-1.5 py-0.5 text-[11px] text-slate-900 dark:text-white truncate"
-                                >
-                                  <option value="">None</option>
-                                  {data.projects.map(prj => (
-                                    <optgroup key={prj.id} label={`${prj.code}: ${prj.name}`}>
-                                      {data.tasks.filter(other => other.id !== t.id && other.projectId === prj.id).map(other => (
-                                        <option key={other.id} value={other.id}>{other.wbs} {other.name}</option>
-                                      ))}
-                                    </optgroup>
-                                  ))}
-                                </select>
-                              </td>
-
-                              {/* INLINE DEPENDENCY TYPE SELECTOR */}
-                              <td className="px-1 py-1.5 border-r border-slate-200 dark:border-slate-800 text-center">
-                                <select
-                                  value={t.depType || "FS"}
-                                  onChange={(e) => updateTaskField(t.id, "depType", e.target.value)}
-                                  className="bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded px-1 py-0.5 text-[10px] font-mono text-slate-900 dark:text-white"
-                                >
-                                  <option value="FS">FS</option>
-                                  <option value="SS">SS</option>
-                                  <option value="FF">FF</option>
-                                  <option value="SF">SF</option>
-                                </select>
+                                <div className="flex flex-wrap items-center gap-1">
+                                  {(t.predecessors || []).map((pRef, pIdx) => {
+                                    const pTask = cpmSchedule.rawMap[pRef.id];
+                                    return (
+                                      <span key={pIdx} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-[10px] font-mono">
+                                        <span>{pTask ? pTask.wbs : "?"}{pRef.type}</span>
+                                        <button
+                                          onClick={() => removePredecessor(t.id, pRef.id)}
+                                          className="text-slate-400 hover:text-rose-500"
+                                        >
+                                          ×
+                                        </button>
+                                      </span>
+                                    );
+                                  })}
+                                  <button
+                                    onClick={() => setMultiDepModalTask(t)}
+                                    className="px-1.5 py-0.5 rounded border border-dashed border-slate-300 dark:border-slate-700 text-slate-500 hover:text-brand-emerald text-[10px] font-semibold"
+                                  >
+                                    + Link
+                                  </button>
+                                </div>
                               </td>
 
                               <td className="px-1.5 py-1.5 border-r border-slate-200 dark:border-slate-800">
@@ -1063,33 +1149,41 @@
                                   type="date"
                                   value={t.esDate}
                                   onChange={(e) => updateTaskField(t.id, "startDate", e.target.value)}
-                                  className="bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded px-1 py-0.5 text-[11px]"
+                                  className="bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded px-1.5 py-0.5 text-[11px]"
                                 />
                               </td>
                               <td className="px-1.5 py-1.5 border-r border-slate-200 dark:border-slate-800">
                                 <input
                                   type="date"
                                   value={t.efDate}
+                                  disabled={t.itemType === "Milestone"}
                                   onChange={(e) => updateTaskField(t.id, "endDate", e.target.value)}
-                                  className="bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded px-1 py-0.5 text-[11px]"
+                                  className="bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded px-1.5 py-0.5 text-[11px] disabled:opacity-50"
                                 />
                               </td>
+
                               <td className="px-1 py-1.5 text-center border-r border-slate-200 dark:border-slate-800">
-                                <input
-                                  type="number"
-                                  min="1"
-                                  value={t.duration}
-                                  onChange={(e) => updateTaskField(t.id, "duration", e.target.value)}
-                                  className="w-10 bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded px-1 py-0.5 text-center font-mono"
-                                />
+                                {t.itemType === "Milestone" ? (
+                                  <span className="font-mono text-[10px] text-brand-emerald font-bold">0d</span>
+                                ) : (
+                                  <input
+                                    type="number"
+                                    min="1"
+                                    value={t.duration}
+                                    onChange={(e) => updateTaskField(t.id, "duration", e.target.value)}
+                                    className="w-10 bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded px-1 py-0.5 text-center font-mono"
+                                  />
+                                )}
                               </td>
+
                               <td className="px-2 py-1.5 border-r border-slate-200 dark:border-slate-800">
                                 <div className="flex items-center gap-1">
                                   <span className="truncate max-w-[65px] text-[10px] text-slate-500 dark:text-slate-400 font-medium">{t.resource || "Mustafa"}</span>
                                   <select
                                     value={t.allocation || 100}
+                                    disabled={t.itemType === "Milestone"}
                                     onChange={(e) => handleAllocationChange(t.id, e.target.value)}
-                                    className="bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded px-1 py-0.5 text-[10px] font-mono text-brand-emerald"
+                                    className="bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded px-1 py-0.5 text-[10px] font-mono text-brand-emerald disabled:opacity-50"
                                   >
                                     <option value="100">100%</option>
                                     <option value="75">75%</option>
@@ -1098,37 +1192,18 @@
                                   </select>
                                 </div>
                               </td>
+
                               <td className="px-1 py-2 text-center border-r border-slate-200 dark:border-slate-800 font-mono text-[11px]">
                                 {t.isCritical ? <span className="text-rose-500 font-bold">0d (CP)</span> : <span className="text-emerald-500">+{t.float}d</span>}
                               </td>
-                              <td className="px-1 py-2 text-center border-r border-slate-200 dark:border-slate-800">
+
+                              <td className="px-1 py-2 text-center">
                                 <button
                                   onClick={() => deleteTask(t.id)}
                                   className="text-slate-400 hover:text-rose-500 font-bold px-1"
-                                  title="Delete Task"
                                 >
                                   ✕
                                 </button>
-                              </td>
-                              <td className="p-0 relative">
-                                <div className="flex relative h-10 items-center">
-                                  {timelineDays.map((d) => (
-                                    <div key={d.index} className="w-12 h-full shrink-0 border-r border-slate-200 dark:border-slate-800/40" />
-                                  ))}
-                                  <div
-                                    style={{ left: `${t.es * 48 + 4}px`, width: `${Math.max(34, t.duration * 48 - 8)}px` }}
-                                    className={`absolute h-6 rounded-md px-2 flex items-center justify-between text-[11px] font-medium shadow-sm ${
-                                      t.done
-                                        ? "bg-slate-400 dark:bg-slate-600 text-white"
-                                        : t.isCritical
-                                          ? "bg-rose-600 text-white"
-                                          : "bg-brand-emerald text-brand-navy font-bold"
-                                    }`}
-                                  >
-                                    <span className="truncate">{t.wbs} {t.name}</span>
-                                    <span className="text-[9px] opacity-80 ml-1">{t.duration}d</span>
-                                  </div>
-                                </div>
                               </td>
                             </tr>
                           ))
@@ -1139,7 +1214,267 @@
                 </div>
               )}
 
-              {/* Procurement & PO Module */}
+              {/* CARD 2: Dedicated Full-Width Gantt Chart & SVG Dependency Arrows (Below Table) */}
+              {activeTab === "gantt" && (
+                <div className="bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-sm">
+                  <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-800 flex justify-between items-center bg-slate-50/50 dark:bg-slate-900/50">
+                    <div>
+                      <h3 className="font-bold text-xs uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                        Interactive Gantt Timeline & Dependency Network
+                      </h3>
+                      <div className="text-[11px] text-slate-500">
+                        {selectedProjectId === "ALL" ? "Program Portfolio Multi-Project Rollup" : "Project Critical Path Timeline"}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3 text-[11px]">
+                      <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-rose-500"></span> Critical Path</span>
+                      <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-brand-emerald"></span> Standard Work</span>
+                      <span className="flex items-center gap-1.5"><span className="text-brand-emerald font-bold">◆</span> Milestone</span>
+                    </div>
+                  </div>
+
+                  <div className="overflow-x-auto relative p-4">
+                    <div style={{ width: `${Math.max(800, cpmSchedule.totalSpanDays * 42 + 220)}px` }} className="relative select-none">
+                      {/* Timeline Days Header */}
+                      <div className="flex border-b border-slate-200 dark:border-slate-800 pb-2 mb-2 pl-[220px]">
+                        {timelineDays.map((d) => (
+                          <div
+                            key={d.index}
+                            style={{ width: "42px" }}
+                            className={`shrink-0 text-center py-1 border-r border-slate-200 dark:border-slate-800/60 ${
+                              d.iso === TODAY_ISO ? "bg-emerald-500/20 text-emerald-600 dark:text-emerald-300 font-bold rounded" : ""
+                            }`}
+                          >
+                            <div className="text-[10px]">D{d.index}</div>
+                            <div className="text-[8px] opacity-70">{d.label}</div>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* SVG Canvas for Dependency Connector Arrows */}
+                      <svg
+                        className="absolute inset-0 pointer-events-none"
+                        style={{
+                          width: `${cpmSchedule.totalSpanDays * 42 + 220}px`,
+                          height: `${cpmSchedule.tasks.length * 40 + 50}px`
+                        }}
+                      >
+                        <defs>
+                          <marker id="arrow-critical" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                            <path d="M 0 1 L 10 5 L 0 9 z" fill="#f43f5e" />
+                          </marker>
+                          <marker id="arrow-normal" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                            <path d="M 0 1 L 10 5 L 0 9 z" fill="#10b981" />
+                          </marker>
+                        </defs>
+                        {cpmSchedule.tasks.map((succ, sIdx) => {
+                          const sY = sIdx * 40 + 56;
+                          const sX = 220 + succ.es * 42;
+                          return (succ.predecessors || []).map((pRef, pIdx) => {
+                            const pIdxFound = cpmSchedule.tasks.findIndex(t => t.id === pRef.id);
+                            if (pIdxFound < 0) return null;
+                            const pred = cpmSchedule.tasks[pIdxFound];
+                            const pY = pIdxFound * 40 + 56;
+                            const pX = 220 + (pred.itemType === "Milestone" ? pred.es * 42 : pred.ef * 42);
+                            const isCritLink = succ.isCritical && pred.isCritical;
+
+                            // Bezier Curve connecting predecessor finish to successor start
+                            const midX = (pX + sX) / 2;
+                            return (
+                              <path
+                                key={`${succ.id}-${pIdx}`}
+                                d={`M ${pX} ${pY} C ${midX} ${pY}, ${midX} ${sY}, ${sX - 4} ${sY}`}
+                                fill="none"
+                                stroke={isCritLink ? "#f43f5e" : "#10b981"}
+                                strokeWidth={isCritLink ? "2" : "1.5"}
+                                strokeDasharray={pRef.type === "FS" ? "" : "3,3"}
+                                markerEnd={isCritLink ? "url(#arrow-critical)" : "url(#arrow-normal)"}
+                                opacity="0.8"
+                              />
+                            );
+                          });
+                        })}
+                      </svg>
+
+                      {/* Deliverable Gantt Rows */}
+                      <div className="space-y-2">
+                        {cpmSchedule.tasks.map((t, idx) => {
+                          const leftPos = 220 + t.es * 42;
+                          const widthPx = Math.max(28, t.duration * 42 - 6);
+                          const isMilestone = t.itemType === "Milestone";
+                          return (
+                            <div key={t.id} className="flex items-center h-8 relative hover:bg-slate-50 dark:hover:bg-slate-800/30 rounded">
+                              {/* Left Row Label */}
+                              <div className="w-[220px] shrink-0 pr-3 truncate text-xs font-medium text-slate-700 dark:text-slate-300 flex items-center justify-between">
+                                <span className="truncate">{t.wbs} {t.name}</span>
+                                <span className="text-[10px] text-slate-400 font-mono ml-1">{isMilestone ? "0d" : `${t.duration}d`}</span>
+                              </div>
+
+                              {/* Gantt Bar or Milestone Diamond */}
+                              {isMilestone ? (
+                                <div
+                                  style={{ left: `${leftPos - 12}px` }}
+                                  className={`absolute w-6 h-6 rotate-45 flex items-center justify-center shadow-md transition z-10 ${
+                                    t.done ? "bg-slate-500" : t.isCritical ? "bg-rose-500" : "bg-brand-emerald"
+                                  }`}
+                                  title={`Milestone: ${t.wbs} ${t.name} (${t.esDate})`}
+                                >
+                                  <div className="w-2 h-2 bg-white rounded-full -rotate-45" />
+                                </div>
+                              ) : (
+                                <div
+                                  style={{ left: `${leftPos}px`, width: `${widthPx}px` }}
+                                  className={`absolute h-6 rounded-md px-2 flex items-center justify-between text-[10px] font-semibold shadow-sm transition z-10 ${
+                                    t.done
+                                      ? "bg-slate-500 text-white"
+                                      : t.isCritical
+                                        ? "bg-rose-600 text-white shadow-rose-500/20"
+                                        : "bg-brand-emerald text-brand-navy font-bold shadow-emerald-500/20"
+                                  }`}
+                                >
+                                  <span className="truncate">{t.name}</span>
+                                  <span className="text-[9px] opacity-80 ml-1">{t.allocation}%</span>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Risk Register (RAID Module) */}
+              {activeTab === "risks" && (
+                <div className="space-y-4">
+                  <form
+                    onSubmit={handleAddRisk}
+                    className="bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-sm flex flex-wrap items-end gap-3 no-print"
+                  >
+                    <div className="w-20">
+                      <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">Risk ID</label>
+                      <input
+                        type="text"
+                        value={newRisk.code}
+                        onChange={(e) => setNewRisk({ ...newRisk, code: e.target.value })}
+                        className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-mono"
+                      />
+                    </div>
+                    <div className="flex-1 min-w-[200px]">
+                      <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">Risk Description</label>
+                      <input
+                        type="text"
+                        value={newRisk.title}
+                        onChange={(e) => setNewRisk({ ...newRisk, title: e.target.value })}
+                        placeholder="e.g. Schedule delay due to GPU allocation lead times"
+                        className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-1.5 text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">Category</label>
+                      <select
+                        value={newRisk.category}
+                        onChange={(e) => setNewRisk({ ...newRisk, category: e.target.value })}
+                        className="bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-2 py-1.5 text-xs"
+                      >
+                        <option value="Technical">Technical</option>
+                        <option value="Schedule">Schedule</option>
+                        <option value="Cost / Financial">Cost / Financial</option>
+                        <option value="Governance">Governance</option>
+                      </select>
+                    </div>
+                    <div className="w-16">
+                      <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">Prob (1-5)</label>
+                      <input
+                        type="number"
+                        min="1"
+                        max="5"
+                        value={newRisk.probability}
+                        onChange={(e) => setNewRisk({ ...newRisk, probability: Number(e.target.value) })}
+                        className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-2 py-1.5 text-xs text-center font-mono"
+                      />
+                    </div>
+                    <div className="w-16">
+                      <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">Impact (1-5)</label>
+                      <input
+                        type="number"
+                        min="1"
+                        max="5"
+                        value={newRisk.impact}
+                        onChange={(e) => setNewRisk({ ...newRisk, impact: Number(e.target.value) })}
+                        className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-2 py-1.5 text-xs text-center font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">Strategy</label>
+                      <select
+                        value={newRisk.strategy}
+                        onChange={(e) => setNewRisk({ ...newRisk, strategy: e.target.value })}
+                        className="bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-2 py-1.5 text-xs"
+                      >
+                        <option value="Mitigate">Mitigate</option>
+                        <option value="Avoid">Avoid</option>
+                        <option value="Transfer">Transfer</option>
+                        <option value="Accept">Accept</option>
+                      </select>
+                    </div>
+                    <button
+                      type="submit"
+                      className="bg-brand-emerald hover:bg-brand-emeraldHover text-brand-navy font-bold text-xs px-4 py-2 rounded-lg transition"
+                    >
+                      + Add Risk
+                    </button>
+                  </form>
+
+                  <div className="bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-sm">
+                    <table className="w-full border-collapse text-left text-xs">
+                      <thead>
+                        <tr className="border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                          <th className="px-4 py-3">ID</th>
+                          <th className="px-4 py-3">RISK TITLE</th>
+                          <th className="px-3 py-3">CATEGORY</th>
+                          <th className="px-2 py-3 text-center">P</th>
+                          <th className="px-2 py-3 text-center">I</th>
+                          <th className="px-3 py-3 text-center">SCORE</th>
+                          <th className="px-3 py-3">STRATEGY</th>
+                          <th className="px-3 py-3">OWNER</th>
+                          <th className="px-3 py-3 text-center">STATUS</th>
+                          <th className="px-3 py-3 text-center">DEL</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+                        {(data.risks || []).map((r) => {
+                          const score = r.probability * r.impact;
+                          const scoreColor = score >= 15 ? "text-rose-500 font-bold" : score >= 8 ? "text-amber-500 font-bold" : "text-emerald-500";
+                          return (
+                            <tr key={r.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
+                              <td className="px-4 py-3 font-mono font-bold text-brand-emerald">{r.code}</td>
+                              <td className="px-4 py-3 font-medium text-slate-900 dark:text-white">{r.title}</td>
+                              <td className="px-3 py-3 text-slate-500">{r.category}</td>
+                              <td className="px-2 py-3 text-center font-mono">{r.probability}</td>
+                              <td className="px-2 py-3 text-center font-mono">{r.impact}</td>
+                              <td className={`px-3 py-3 text-center font-mono ${scoreColor}`}>{score}</td>
+                              <td className="px-3 py-3 font-medium">{r.strategy}</td>
+                              <td className="px-3 py-3 text-slate-500">{r.owner}</td>
+                              <td className="px-3 py-3 text-center">
+                                <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${r.status === 'Open' ? 'bg-rose-500/10 text-rose-500' : 'bg-emerald-500/10 text-emerald-500'}`}>
+                                  {r.status}
+                                </span>
+                              </td>
+                              <td className="px-3 py-3 text-center">
+                                <button onClick={() => deleteRisk(r.id)} className="text-slate-400 hover:text-rose-500 font-bold">✕</button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* Procurement Module */}
               {activeTab === "procurement" && (
                 <div className="space-y-4">
                   <form
@@ -1275,7 +1610,7 @@
                       {cpmSchedule.tasks.filter((t) => t.status === col).map((t) => (
                         <div key={t.id} className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-1.5 shadow-sm">
                           <div className="flex justify-between items-center text-[11px] font-mono text-brand-emerald">
-                            <span>{t.wbs}</span>
+                            <span>{t.wbs} {t.itemType === 'Milestone' && '◆'}</span>
                             <span className="text-slate-400">{t.duration}d • {t.allocation}% effort</span>
                           </div>
                           <div className="text-xs font-semibold text-slate-900 dark:text-white">{t.name}</div>
@@ -1289,7 +1624,74 @@
             </main>
           </div>
 
-          {/* Program & Project CRUD Modal */}
+          {/* Multiple Predecessor Linking Modal */}
+          {multiDepModalTask && (
+            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+              <div className="bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-800 rounded-3xl p-6 w-full max-w-md space-y-4 shadow-2xl">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-bold text-base text-slate-900 dark:text-white">
+                    Link Predecessors to {multiDepModalTask.wbs}
+                  </h3>
+                  <button type="button" onClick={() => setMultiDepModalTask(null)} className="text-slate-400 hover:text-white">✕</button>
+                </div>
+                <div className="text-xs text-slate-500">
+                  Select dependencies to enforce critical path dates. Tasks can link across projects.
+                </div>
+                <div className="space-y-2 max-h-60 overflow-y-auto">
+                  {data.tasks.filter(t => t.id !== multiDepModalTask.id).map(other => {
+                    const isLinked = (multiDepModalTask.predecessors || []).some(p => p.id === other.id);
+                    const currentRef = (multiDepModalTask.predecessors || []).find(p => p.id === other.id);
+                    return (
+                      <div key={other.id} className="flex items-center justify-between p-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs">
+                        <span className="font-medium truncate mr-2">{other.wbs} {other.name}</span>
+                        {isLinked ? (
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-mono text-brand-emerald font-bold">{currentRef.type}</span>
+                            <button
+                              onClick={() => {
+                                removePredecessor(multiDepModalTask.id, other.id);
+                                setMultiDepModalTask(prev => ({ ...prev, predecessors: prev.predecessors.filter(p => p.id !== other.id) }));
+                              }}
+                              className="px-2 py-1 rounded bg-rose-500/10 text-rose-500 text-[10px] font-bold"
+                            >
+                              Unlink
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-1">
+                            {["FS", "SS", "FF"].map(type => (
+                              <button
+                                key={type}
+                                onClick={() => {
+                                  addPredecessor(multiDepModalTask.id, other.id, type, 0);
+                                  setMultiDepModalTask(prev => ({
+                                    ...prev,
+                                    predecessors: [...(prev.predecessors || []), { id: other.id, type, lag: 0 }]
+                                  }));
+                                }}
+                                className="px-2 py-1 rounded bg-brand-emerald/10 text-brand-emerald hover:bg-brand-emerald hover:text-brand-navy font-bold text-[10px] transition"
+                              >
+                                + {type}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setMultiDepModalTask(null)}
+                  className="w-full py-2.5 rounded-xl bg-brand-emerald hover:bg-brand-emeraldHover text-brand-navy font-bold text-xs"
+                >
+                  Done
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Program/Project CRUD Modal */}
           {showManageModal && (
             <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
               <div className="bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-800 rounded-3xl p-6 w-full max-w-xl space-y-4 shadow-2xl">
@@ -1496,7 +1898,7 @@
             </div>
           )}
 
-          {/* Executive Document Generation & Export Modal */}
+          {/* Executive Report Modal */}
           {showReportModal && (
             <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
               <div className="bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-800 rounded-3xl p-6 w-full max-w-3xl space-y-4 shadow-2xl max-h-[90vh] flex flex-col">
@@ -1527,7 +1929,7 @@
 
                   <div className="grid grid-cols-3 gap-3">
                     <div className="p-3 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700">
-                      <div className="text-[10px] text-slate-400 font-bold uppercase">Total Deliverables</div>
+                      <div className="text-[10px] text-slate-400 font-bold uppercase">Total Items</div>
                       <div className="text-lg font-bold">{cpmSchedule.tasks.length}</div>
                     </div>
                     <div className="p-3 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700">
@@ -1535,19 +1937,18 @@
                       <div className="text-lg font-bold text-rose-500">{cpmSchedule.criticalCount}</div>
                     </div>
                     <div className="p-3 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700">
-                      <div className="text-[10px] text-slate-400 font-bold uppercase">Committed Procurement</div>
-                      <div className="text-lg font-bold text-emerald-500">
-                        ${data.procurements.reduce((acc, p) => acc + (p.committed || 0), 0).toLocaleString()}
-                      </div>
+                      <div className="text-[10px] text-slate-400 font-bold uppercase">Open Risks</div>
+                      <div className="text-lg font-bold text-amber-500">{(data.risks || []).filter(r => r.status === 'Open').length}</div>
                     </div>
                   </div>
 
-                  <h3 className="font-bold text-xs uppercase tracking-wider text-slate-700 dark:text-slate-300 pt-2">Schedule Deliverables & Critical Dependencies</h3>
+                  <h3 className="font-bold text-xs uppercase tracking-wider text-slate-700 dark:text-slate-300 pt-2">Schedule Deliverables & Milestones</h3>
                   <table className="w-full border-collapse text-left border border-slate-300 dark:border-slate-700">
                     <thead>
                       <tr className="bg-slate-200 dark:bg-slate-800 text-[10px]">
                         <th className="p-2 border border-slate-300 dark:border-slate-700">WBS</th>
-                        <th className="p-2 border border-slate-300 dark:border-slate-700">Deliverable Name</th>
+                        <th className="p-2 border border-slate-300 dark:border-slate-700">Type</th>
+                        <th className="p-2 border border-slate-300 dark:border-slate-700">Item Name</th>
                         <th className="p-2 border border-slate-300 dark:border-slate-700">Start Date</th>
                         <th className="p-2 border border-slate-300 dark:border-slate-700">End Date</th>
                         <th className="p-2 border border-slate-300 dark:border-slate-700">Dur</th>
@@ -1559,6 +1960,7 @@
                       {cpmSchedule.tasks.map(t => (
                         <tr key={t.id} className={t.isCritical ? "font-bold text-rose-500" : ""}>
                           <td className="p-2 border border-slate-300 dark:border-slate-700 font-mono">{t.wbs}</td>
+                          <td className="p-2 border border-slate-300 dark:border-slate-700">{t.itemType || "Task"}</td>
                           <td className="p-2 border border-slate-300 dark:border-slate-700">{t.name}</td>
                           <td className="p-2 border border-slate-300 dark:border-slate-700">{t.esDate}</td>
                           <td className="p-2 border border-slate-300 dark:border-slate-700">{t.efDate}</td>
