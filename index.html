@@ -146,11 +146,8 @@
 
       useEffect(() => {
         const root = document.documentElement;
-        if (theme === "dark") {
-          root.classList.add("dark");
-        } else {
-          root.classList.remove("dark");
-        }
+        if (theme === "dark") root.classList.add("dark");
+        else root.classList.remove("dark");
         localStorage.setItem(THEME_KEY, theme);
       }, [theme]);
 
@@ -166,6 +163,9 @@
       // Cloud DB Sync State
       const [syncStatus, setSyncStatus] = useState("Initializing DB...");
       const [lastSyncedAt, setLastSyncedAt] = useState(null);
+
+      // CRITICAL GUARDS: Prevent premature saves from overwriting cloud data on startup
+      const isInitialCloudLoadComplete = useRef(false);
       const isPullingRef = useRef(false);
 
       const dbClient = useMemo(() => {
@@ -179,7 +179,7 @@
 
       const [data, setData] = useState(INITIAL_EMPTY_WORKSPACE);
 
-      // Navigation & Modals
+      // Navigation & Modals: Default to "ALL" so no tasks are hidden on startup
       const [selectedProgramId, setSelectedProgramId] = useState("ALL");
       const [selectedProjectId, setSelectedProjectId] = useState("ALL");
       const [activeTab, setActiveTab] = useState("gantt");
@@ -231,10 +231,35 @@
         return () => subscription.unsubscribe();
       }, [dbClient]);
 
-      // Pull workspace from Cloud DB
+      // LocalStorage Recovery Helper: Scans for tasks saved before login or in prior versions
+      const recoverLocalOrLegacyTasks = () => {
+        const potentialKeys = [
+          "apexpms_supabase_secure_v5",
+          "apexpms_state",
+          "apexpms_local_v1",
+          "apexpms_tasks",
+          "apexpms_workspace"
+        ];
+        for (const k of potentialKeys) {
+          try {
+            const raw = localStorage.getItem(k);
+            if (raw) {
+              const parsed = JSON.parse(raw);
+              const foundTasks = parsed.tasks || (Array.isArray(parsed) ? parsed : null);
+              if (foundTasks && foundTasks.length > 0) {
+                return foundTasks;
+              }
+            }
+          } catch (e) {}
+        }
+        return [];
+      };
+
+      // Pull workspace from Cloud DB with Fail-Safe Protection
       const pullWorkspace = async (activeUser) => {
         if (!dbClient || !activeUser) return;
         try {
+          isPullingRef.current = true;
           setSyncStatus("Syncing with Cloud DB...");
           const { data: row, error } = await dbClient
             .from("workspaces")
@@ -245,23 +270,45 @@
           if (error) throw error;
 
           if (row && row.state && row.state.programs) {
-            isPullingRef.current = true;
-            setData(row.state);
+            let loadedState = row.state;
+
+            // If cloud row has 0 tasks, check if browser has recoverable tasks from prior steps
+            if (!loadedState.tasks || loadedState.tasks.length === 0) {
+              const recovered = recoverLocalOrLegacyTasks();
+              if (recovered.length > 0) {
+                loadedState = { ...loadedState, tasks: recovered };
+              }
+            }
+
+            setData(loadedState);
             setLastSyncedAt(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
             setSyncStatus("Cloud DB Synced");
-            setTimeout(() => { isPullingRef.current = false; }, 300);
           } else {
-            await pushWorkspace(INITIAL_EMPTY_WORKSPACE, activeUser);
-            setData(INITIAL_EMPTY_WORKSPACE);
+            // First time user: check local recovery before creating empty state
+            const recovered = recoverLocalOrLegacyTasks();
+            const initialState = recovered.length > 0
+              ? { ...INITIAL_EMPTY_WORKSPACE, tasks: recovered }
+              : INITIAL_EMPTY_WORKSPACE;
+
+            setData(initialState);
+            await pushWorkspace(initialState, activeUser);
           }
         } catch (err) {
           setSyncStatus("Offline Cache");
+          const recovered = recoverLocalOrLegacyTasks();
+          if (recovered.length > 0) {
+            setData(prev => ({ ...prev, tasks: recovered }));
+          }
+        } finally {
+          // Unlock saving ONLY after initial load is fully finished
+          isInitialCloudLoadComplete.current = true;
+          setTimeout(() => { isPullingRef.current = false; }, 300);
         }
       };
 
-      // Push workspace to Cloud DB
+      // Push workspace to Cloud DB (Strictly blocked until initial cloud pull completes)
       const pushWorkspace = async (stateToSave, activeUser) => {
-        if (!dbClient || !activeUser) return;
+        if (!dbClient || !activeUser || !isInitialCloudLoadComplete.current) return;
         try {
           setSyncStatus("Saving to DB...");
           const { error } = await dbClient
@@ -280,12 +327,17 @@
         }
       };
 
+      // Trigger pull on user change
       useEffect(() => {
-        if (user) pullWorkspace(user);
+        if (user) {
+          isInitialCloudLoadComplete.current = false;
+          pullWorkspace(user);
+        }
       }, [user]);
 
+      // Debounced push to Supabase (Guarded against premature empty state writes)
       useEffect(() => {
-        if (!user || isPullingRef.current) return;
+        if (!user || isPullingRef.current || !isInitialCloudLoadComplete.current) return;
         const timer = setTimeout(() => {
           pushWorkspace(data, user);
         }, 600);
@@ -315,18 +367,25 @@
       };
 
       // Filtered views
-      const programProjects = useMemo(() => {
-        if (selectedProgramId === "ALL") return data.projects;
-        return data.projects.filter(p => p.programId === selectedProgramId);
-      }, [data.projects, selectedProgramId]);
+const programProjects = useMemo(() => {
+  if (selectedProgramId === "ALL") return data.projects;
+  return data.projects.filter(p => p.programId === selectedProgramId);
+}, [data.projects, selectedProgramId]);
 
-      const visibleTasks = useMemo(() => {
-        return data.tasks.filter(t => {
-          if (selectedProjectId !== "ALL") return t.projectId === selectedProjectId;
-          if (selectedProgramId !== "ALL") return programProjects.some(p => p.id === t.projectId);
-          return true;
-        });
-      }, [data.tasks, selectedProjectId, selectedProgramId, programProjects]);
+const visibleTasks = useMemo(() => {
+  return data.tasks.filter(t => {
+    // If selected project matches directly
+    if (selectedProjectId !== "ALL") {
+      const activePrj = data.projects.find(p => p.id === selectedProjectId);
+      return t.projectId === selectedProjectId || (activePrj && t.projectId === activePrj.code);
+    }
+    // If selected program matches
+    if (selectedProgramId !== "ALL") {
+      return programProjects.some(p => p.id === t.projectId || p.code === t.projectId);
+    }
+    return true;
+  });
+}, [data.tasks, selectedProjectId, selectedProgramId, programProjects]);
 
       // PMI Forward & Backward Pass Critical Path Engine with Auto-Date Adjustments
       const cpmSchedule = useMemo(() => {
