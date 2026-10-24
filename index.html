@@ -9,6 +9,9 @@
   <meta name="apple-mobile-web-app-title" content="ApexPPM" />
   <title>ApexPPM — Enterprise Portfolio & Program Manager</title>
 
+  <!-- External App Configuration (Reads separate config.js) -->
+  <script src="config.js"></script>
+
   <!-- Branded SVG Icon (Matching AI Registry Hub Triangle & Circle) -->
   <script>
     (function() {
@@ -88,12 +91,11 @@
   <script type="text/babel">
     const { useState, useEffect, useMemo, useRef } = React;
 
-    // Secure DB credentials
-    const DEFAULT_DB_URL = "https://tzqbzzdctwdyvwvyvwzk.supabase.co";
-    const DEFAULT_DB_ANON_KEY = "sb_publishable_Jve6BGkRJUrhkX8vMlDJUA_m_4RoWpT";
-    
+    // Load credentials from config.js or use verified publishable key
+    const DEFAULT_DB_URL = window.APEX_CONFIG?.DB_URL || "https://tzqbzzdctwdyvwvyvwzk.supabase.co";
+    const DEFAULT_DB_ANON_KEY = window.APEX_CONFIG?.DB_ANON_KEY || "sb_publishable_Jve6BGkRJUrhkX8vMlDJUA_m_4RoWpT";
+
     const TODAY_ISO = new Date().toISOString().slice(0, 10);
-    const STORAGE_KEY = "apexpms_db_secure_v6";
     const THEME_KEY = "apexpms_theme";
 
     const parseISO = (str) => {
@@ -141,7 +143,6 @@
     };
 
     function App() {
-      // Theme State (Dark / Light)
       const [theme, setTheme] = useState(() => localStorage.getItem(THEME_KEY) || "dark");
 
       useEffect(() => {
@@ -164,7 +165,7 @@
       const [syncStatus, setSyncStatus] = useState("Initializing DB...");
       const [lastSyncedAt, setLastSyncedAt] = useState(null);
 
-      // CRITICAL GUARDS: Prevent premature saves from overwriting cloud data on startup
+      // Guard: Strictly prevents premature local state from overwriting cloud DB
       const isInitialCloudLoadComplete = useRef(false);
       const isPullingRef = useRef(false);
 
@@ -179,12 +180,25 @@
 
       const [data, setData] = useState(INITIAL_EMPTY_WORKSPACE);
 
-      // Navigation & Modals: Default to "ALL" so no tasks are hidden on startup
+      // Navigation & Active Filters
       const [selectedProgramId, setSelectedProgramId] = useState("ALL");
       const [selectedProjectId, setSelectedProjectId] = useState("ALL");
       const [activeTab, setActiveTab] = useState("gantt");
+
+      // Modals
       const [showManageModal, setShowManageModal] = useState(false);
       const [showReportModal, setShowReportModal] = useState(false);
+
+      // CRUD Form State
+      const [manageAction, setManageAction] = useState("create");
+      const [manageType, setManageType] = useState("program");
+      const [targetEntityId, setTargetEntityId] = useState("");
+      const [editCode, setEditCode] = useState("");
+      const [editName, setEditName] = useState("");
+      const [editManager, setEditManager] = useState("Mustafa Nisar");
+      const [editBudget, setEditBudget] = useState(150000);
+      const [editMethodology, setEditMethodology] = useState("Hybrid Agile");
+      const [editParentPgmId, setEditParentPgmId] = useState("");
 
       // Quick-Add inputs
       const [qaWbs, setQaWbs] = useState("");
@@ -197,9 +211,6 @@
       const [qaLag, setQaLag] = useState(0);
       const [qaResource, setQaResource] = useState("Mustafa Nisar");
       const [qaAllocation, setQaAllocation] = useState(100);
-
-      // Manage/Edit Form State
-      const [editingEntity, setEditingEntity] = useState({ type: "project", id: "", code: "", name: "", manager: "", budget: 0, methodology: "" });
 
       // Procurement Form State
       const [newPO, setNewPO] = useState({
@@ -231,31 +242,7 @@
         return () => subscription.unsubscribe();
       }, [dbClient]);
 
-      // LocalStorage Recovery Helper: Scans for tasks saved before login or in prior versions
-      const recoverLocalOrLegacyTasks = () => {
-        const potentialKeys = [
-          "apexpms_supabase_secure_v5",
-          "apexpms_state",
-          "apexpms_local_v1",
-          "apexpms_tasks",
-          "apexpms_workspace"
-        ];
-        for (const k of potentialKeys) {
-          try {
-            const raw = localStorage.getItem(k);
-            if (raw) {
-              const parsed = JSON.parse(raw);
-              const foundTasks = parsed.tasks || (Array.isArray(parsed) ? parsed : null);
-              if (foundTasks && foundTasks.length > 0) {
-                return foundTasks;
-              }
-            }
-          } catch (e) {}
-        }
-        return [];
-      };
-
-      // Pull workspace from Cloud DB with Fail-Safe Protection
+      // Pull workspace from Cloud DB
       const pullWorkspace = async (activeUser) => {
         if (!dbClient || !activeUser) return;
         try {
@@ -270,43 +257,22 @@
           if (error) throw error;
 
           if (row && row.state && row.state.programs) {
-            let loadedState = row.state;
-
-            // If cloud row has 0 tasks, check if browser has recoverable tasks from prior steps
-            if (!loadedState.tasks || loadedState.tasks.length === 0) {
-              const recovered = recoverLocalOrLegacyTasks();
-              if (recovered.length > 0) {
-                loadedState = { ...loadedState, tasks: recovered };
-              }
-            }
-
-            setData(loadedState);
+            setData(row.state);
             setLastSyncedAt(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
             setSyncStatus("Cloud DB Synced");
           } else {
-            // First time user: check local recovery before creating empty state
-            const recovered = recoverLocalOrLegacyTasks();
-            const initialState = recovered.length > 0
-              ? { ...INITIAL_EMPTY_WORKSPACE, tasks: recovered }
-              : INITIAL_EMPTY_WORKSPACE;
-
-            setData(initialState);
-            await pushWorkspace(initialState, activeUser);
+            setData(INITIAL_EMPTY_WORKSPACE);
+            await pushWorkspace(INITIAL_EMPTY_WORKSPACE, activeUser);
           }
         } catch (err) {
           setSyncStatus("Offline Cache");
-          const recovered = recoverLocalOrLegacyTasks();
-          if (recovered.length > 0) {
-            setData(prev => ({ ...prev, tasks: recovered }));
-          }
         } finally {
-          // Unlock saving ONLY after initial load is fully finished
           isInitialCloudLoadComplete.current = true;
           setTimeout(() => { isPullingRef.current = false; }, 300);
         }
       };
 
-      // Push workspace to Cloud DB (Strictly blocked until initial cloud pull completes)
+      // Push workspace to Cloud DB
       const pushWorkspace = async (stateToSave, activeUser) => {
         if (!dbClient || !activeUser || !isInitialCloudLoadComplete.current) return;
         try {
@@ -327,7 +293,6 @@
         }
       };
 
-      // Trigger pull on user change
       useEffect(() => {
         if (user) {
           isInitialCloudLoadComplete.current = false;
@@ -335,7 +300,6 @@
         }
       }, [user]);
 
-      // Debounced push to Supabase (Guarded against premature empty state writes)
       useEffect(() => {
         if (!user || isPullingRef.current || !isInitialCloudLoadComplete.current) return;
         const timer = setTimeout(() => {
@@ -366,34 +330,30 @@
         }
       };
 
-      // Filtered views
-const programProjects = useMemo(() => {
-  if (selectedProgramId === "ALL") return data.projects;
-  return data.projects.filter(p => p.programId === selectedProgramId);
-}, [data.projects, selectedProgramId]);
+      const programProjects = useMemo(() => {
+        if (selectedProgramId === "ALL") return data.projects;
+        return data.projects.filter(p => p.programId === selectedProgramId);
+      }, [data.projects, selectedProgramId]);
 
-const visibleTasks = useMemo(() => {
-  return data.tasks.filter(t => {
-    // If selected project matches directly
-    if (selectedProjectId !== "ALL") {
-      const activePrj = data.projects.find(p => p.id === selectedProjectId);
-      return t.projectId === selectedProjectId || (activePrj && t.projectId === activePrj.code);
-    }
-    // If selected program matches
-    if (selectedProgramId !== "ALL") {
-      return programProjects.some(p => p.id === t.projectId || p.code === t.projectId);
-    }
-    return true;
-  });
-}, [data.tasks, selectedProjectId, selectedProgramId, programProjects]);
+      const visibleTasks = useMemo(() => {
+        return data.tasks.filter(t => {
+          if (selectedProjectId !== "ALL") {
+            const activePrj = data.projects.find(p => p.id === selectedProjectId);
+            return t.projectId === selectedProjectId || (activePrj && t.projectId === activePrj.code);
+          }
+          if (selectedProgramId !== "ALL") {
+            return programProjects.some(p => p.id === t.projectId || p.code === t.projectId);
+          }
+          return true;
+        });
+      }, [data.tasks, selectedProjectId, selectedProgramId, programProjects]);
 
-      // PMI Forward & Backward Pass Critical Path Engine with Auto-Date Adjustments
+      // Critical Path Method Forward & Backward Pass Engine
       const cpmSchedule = useMemo(() => {
         if (visibleTasks.length === 0) {
-          return { tasks: [], anchorDate: TODAY_ISO, totalSpanDays: 25, criticalCount: 0 };
+          return { tasks: [], anchorDate: TODAY_ISO, totalSpanDays: 30, criticalCount: 0 };
         }
 
-        // Map for lookup
         const taskMap = {};
         data.tasks.forEach(t => {
           taskMap[t.id] = {
@@ -406,7 +366,6 @@ const visibleTasks = useMemo(() => {
           };
         });
 
-        // 1. Forward Pass: Auto adjust task start/end based on predecessor dependency types
         let changed = true;
         let passes = 0;
         while (changed && passes < 25) {
@@ -419,17 +378,10 @@ const visibleTasks = useMemo(() => {
               const lag = Number(t.lag || 0);
               let requiredStart = t.esDate;
 
-              if (dep === "FS") {
-                requiredStart = addDaysISO(pred.efDate, lag);
-              } else if (dep === "SS") {
-                requiredStart = addDaysISO(pred.esDate, lag);
-              } else if (dep === "FF") {
-                const targetEnd = addDaysISO(pred.efDate, lag);
-                requiredStart = addDaysISO(targetEnd, -t.duration);
-              } else if (dep === "SF") {
-                const targetEnd = addDaysISO(pred.esDate, lag);
-                requiredStart = addDaysISO(targetEnd, -t.duration);
-              }
+              if (dep === "FS") requiredStart = addDaysISO(pred.efDate, lag);
+              else if (dep === "SS") requiredStart = addDaysISO(pred.esDate, lag);
+              else if (dep === "FF") requiredStart = addDaysISO(addDaysISO(pred.efDate, lag), -t.duration);
+              else if (dep === "SF") requiredStart = addDaysISO(addDaysISO(pred.esDate, lag), -t.duration);
 
               if (requiredStart !== t.esDate) {
                 t.esDate = requiredStart;
@@ -448,7 +400,6 @@ const visibleTasks = useMemo(() => {
           t.ef = t.es + t.duration;
         });
 
-        // 2. Backward Pass: Calculate Late Finish (LF), Late Start (LS), and Float
         const maxEF = Math.max(...visibleNodes.map(n => n.ef), 1);
         visibleNodes.forEach(n => { n.lf = maxEF; n.ls = n.lf - n.duration; });
 
@@ -476,8 +427,6 @@ const visibleTasks = useMemo(() => {
         visibleNodes.forEach(n => {
           n.float = Math.max(0, n.ls - n.es);
           n.isCritical = n.float === 0 && !n.done;
-          n.displayStartDate = tDateString(n.esDate);
-          n.displayEndDate = tDateString(n.efDate);
         });
 
         return {
@@ -488,10 +437,6 @@ const visibleTasks = useMemo(() => {
         };
       }, [visibleTasks, data.tasks]);
 
-      function tDateString(iso) {
-        return iso || TODAY_ISO;
-      }
-
       const timelineDays = useMemo(() => {
         return Array.from({ length: cpmSchedule.totalSpanDays }, (_, i) => {
           const iso = addDaysISO(cpmSchedule.anchorDate, i);
@@ -499,14 +444,13 @@ const visibleTasks = useMemo(() => {
         });
       }, [cpmSchedule.anchorDate, cpmSchedule.totalSpanDays]);
 
-      // Resource Allocation Adjustment (PMI Effort-Driven Scheduling)
+      // Effort-driven resource allocation
       const handleAllocationChange = (taskId, newAlloc) => {
         const alloc = Math.max(10, Math.min(200, Number(newAlloc || 100)));
         setData(prev => ({
           ...prev,
           tasks: prev.tasks.map(t => {
             if (t.id !== taskId) return t;
-            // Base planned work in person-days = duration * (current allocation / 100)
             const baseWork = Math.max(1, Number(t.duration || 1) * (Number(t.allocation || 100) / 100));
             const newDuration = Math.max(1, Math.round(baseWork / (alloc / 100)));
             const newEnd = addDaysISO(t.startDate || TODAY_ISO, newDuration);
@@ -515,6 +459,7 @@ const visibleTasks = useMemo(() => {
         }));
       };
 
+      // Task CRUD Operations
       const handleAddTask = (e) => {
         e.preventDefault();
         if (!qaName.trim()) return;
@@ -538,14 +483,11 @@ const visibleTasks = useMemo(() => {
           ac: 0
         };
 
-        // If predecessor is set, auto-cascade start date on creation
         if (newTask.predecessorId) {
           const pred = data.tasks.find(t => t.id === newTask.predecessorId);
-          if (pred) {
-            if (newTask.depType === "FS") {
-              newTask.startDate = addDaysISO(pred.endDate || TODAY_ISO, newTask.lag);
-              newTask.endDate = addDaysISO(newTask.startDate, newTask.duration);
-            }
+          if (pred && newTask.depType === "FS") {
+            newTask.startDate = addDaysISO(pred.endDate || TODAY_ISO, newTask.lag);
+            newTask.endDate = addDaysISO(newTask.startDate, newTask.duration);
           }
         }
 
@@ -578,7 +520,107 @@ const visibleTasks = useMemo(() => {
         }));
       };
 
-      // Add Procurement Item
+      const deleteTask = (taskId) => {
+        if (!confirm("Are you sure you want to delete this deliverable?")) return;
+        setData(prev => ({
+          ...prev,
+          tasks: prev.tasks
+            .filter(t => t.id !== taskId)
+            .map(t => t.predecessorId === taskId ? { ...t, predecessorId: "" } : t)
+        }));
+      };
+
+      // Program & Project CRUD
+      const handleProgramProjectSubmit = (e) => {
+        e.preventDefault();
+        if (!editName.trim()) return;
+
+        if (manageAction === "create") {
+          if (manageType === "program") {
+            const newId = "pgm-" + Date.now();
+            const newPgm = {
+              id: newId,
+              code: editCode.trim() || `PGM-0${data.programs.length + 1}`,
+              name: editName.trim(),
+              manager: editManager || "Mustafa Nisar",
+              budget: Number(editBudget || 100000)
+            };
+            setData(prev => ({ ...prev, programs: [...prev.programs, newPgm] }));
+            setSelectedProgramId(newId);
+          } else {
+            const newId = "prj-" + Date.now();
+            const parentPgm = editParentPgmId || (selectedProgramId !== "ALL" ? selectedProgramId : data.programs[0]?.id);
+            const count = data.projects.filter(p => p.programId === parentPgm).length;
+            const newPrj = {
+              id: newId,
+              programId: parentPgm,
+              code: editCode.trim() || `PRJ-0${count + 1}`,
+              name: editName.trim(),
+              methodology: editMethodology || "Hybrid Agile",
+              baselineStart: TODAY_ISO
+            };
+            setData(prev => ({ ...prev, projects: [...prev.projects, newPrj] }));
+            setSelectedProjectId(newId);
+          }
+        } else if (manageAction === "edit") {
+          if (manageType === "program") {
+            setData(prev => ({
+              ...prev,
+              programs: prev.programs.map(p => p.id === targetEntityId ? {
+                ...p,
+                code: editCode,
+                name: editName,
+                manager: editManager,
+                budget: Number(editBudget || 0)
+              } : p)
+            }));
+          } else {
+            setData(prev => ({
+              ...prev,
+              projects: prev.projects.map(p => p.id === targetEntityId ? {
+                ...p,
+                code: editCode,
+                name: editName,
+                methodology: editMethodology
+              } : p)
+            }));
+          }
+        }
+        setShowManageModal(false);
+      };
+
+      const deleteProgram = (pgmId) => {
+        if (data.programs.length <= 1) {
+          alert("Cannot delete the only remaining program. Create another program first.");
+          return;
+        }
+        if (!confirm("Are you sure? Deleting this program will remove all linked projects and tasks!")) return;
+        const projectIdsToRemove = data.projects.filter(p => p.programId === pgmId).map(p => p.id);
+        setData(prev => ({
+          ...prev,
+          programs: prev.programs.filter(p => p.id !== pgmId),
+          projects: prev.projects.filter(p => p.programId !== pgmId),
+          tasks: prev.tasks.filter(t => !projectIdsToRemove.includes(t.projectId))
+        }));
+        setSelectedProgramId("ALL");
+        setSelectedProjectId("ALL");
+      };
+
+      const deleteProject = (prjId) => {
+        if (data.projects.length <= 1) {
+          alert("Cannot delete the only remaining project. Create another project first.");
+          return;
+        }
+        if (!confirm("Are you sure? Deleting this project will remove all its deliverables!")) return;
+        setData(prev => ({
+          ...prev,
+          projects: prev.projects.filter(p => p.id !== prjId),
+          tasks: prev.tasks.filter(t => t.projectId !== prjId)
+        }));
+        setSelectedProjectId("ALL");
+      };
+
+      // Procurement Handlers
       const handleAddPO = (e) => {
         e.preventDefault();
         if (!newPO.vendor.trim()) return;
@@ -606,37 +648,14 @@ const visibleTasks = useMemo(() => {
         }));
       };
 
-      // Save Program or Project edits
-      const handleSaveEntityEdit = (e) => {
-        e.preventDefault();
-        if (!editingEntity.name.trim()) return;
-
-        if (editingEntity.type === "program") {
-          setData(prev => ({
-            ...prev,
-            programs: prev.programs.map(p => p.id === editingEntity.id ? {
-              ...p,
-              code: editingEntity.code,
-              name: editingEntity.name,
-              manager: editingEntity.manager,
-              budget: Number(editingEntity.budget || 0)
-            } : p)
-          }));
-        } else {
-          setData(prev => ({
-            ...prev,
-            projects: prev.projects.map(p => p.id === editingEntity.id ? {
-              ...p,
-              code: editingEntity.code,
-              name: editingEntity.name,
-              methodology: editingEntity.methodology
-            } : p)
-          }));
-        }
-        setShowManageModal(false);
+      const deletePO = (id) => {
+        if (!confirm("Delete this PO record?")) return;
+        setData(prev => ({
+          ...prev,
+          procurements: prev.procurements.filter(p => p.id !== id)
+        }));
       };
 
-      // Google Docs Copy Helper
       const copyReportToClipboard = () => {
         const reportElement = document.getElementById("executive-report-content");
         if (!reportElement) return;
@@ -645,10 +664,9 @@ const visibleTasks = useMemo(() => {
         const textBlob = new Blob([reportElement.innerText], { type: "text/plain" });
         navigator.clipboard.write([
           new ClipboardItem({ "text/html": blob, "text/plain": textBlob })
-        ]).then(() => alert("Formatted Report copied! You can now paste directly into Google Docs."));
+        ]).then(() => alert("Executive Report copied! You can now paste directly into Google Docs."));
       };
 
-      // Auth Gate
       if (isAuthLoading) {
         return (
           <div className="min-h-screen bg-brand-navy flex items-center justify-center text-slate-400 text-sm">
@@ -720,7 +738,7 @@ const visibleTasks = useMemo(() => {
 
       return (
         <div className="min-h-screen flex flex-col transition-colors duration-200">
-          {/* Header */}
+          {/* Header Bar */}
           <header className="border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-[#111827] px-4 md:px-6 py-3 flex flex-wrap items-center justify-between gap-3 shadow-sm no-print">
             <div className="flex items-center gap-3">
               <div className="w-9 h-9 rounded-xl bg-brand-navy border border-brand-emerald flex items-center justify-center font-bold text-base shadow">
@@ -740,7 +758,6 @@ const visibleTasks = useMemo(() => {
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
-              {/* Program Selector */}
               <select
                 value={selectedProgramId}
                 onChange={(e) => setSelectedProgramId(e.target.value)}
@@ -752,7 +769,6 @@ const visibleTasks = useMemo(() => {
                 ))}
               </select>
 
-              {/* Project Selector */}
               <select
                 value={selectedProjectId}
                 onChange={(e) => setSelectedProjectId(e.target.value)}
@@ -764,27 +780,20 @@ const visibleTasks = useMemo(() => {
                 ))}
               </select>
 
-              {/* Manage Program / Project */}
               <button
                 onClick={() => {
-                  const targetPrj = data.projects.find(p => p.id === selectedProjectId) || data.projects[0];
-                  setEditingEntity({
-                    type: "project",
-                    id: targetPrj?.id || "",
-                    code: targetPrj?.code || "",
-                    name: targetPrj?.name || "",
-                    manager: "Mustafa Nisar",
-                    budget: 150000,
-                    methodology: targetPrj?.methodology || "Hybrid"
-                  });
+                  setManageAction("create");
+                  setManageType("project");
+                  setEditCode(`PRJ-0${data.projects.length + 1}`);
+                  setEditName("");
+                  setEditParentPgmId(selectedProgramId !== "ALL" ? selectedProgramId : data.programs[0]?.id);
                   setShowManageModal(true);
                 }}
-                className="bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-700 text-xs font-medium px-3 py-1.5 rounded-lg transition"
+                className="bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-700 text-xs font-semibold px-3 py-1.5 rounded-lg transition"
               >
-                ⚙️ Manage
+                ⚙️ Manage & CRUD
               </button>
 
-              {/* Export Report / Doc */}
               <button
                 onClick={() => setShowReportModal(true)}
                 className="bg-brand-emerald hover:bg-brand-emeraldHover text-brand-navy font-bold text-xs px-3 py-1.5 rounded-lg shadow-sm transition"
@@ -792,7 +801,6 @@ const visibleTasks = useMemo(() => {
                 📄 Export Report
               </button>
 
-              {/* Dark / Light Toggle */}
               <button
                 onClick={toggleTheme}
                 className="p-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs"
@@ -801,7 +809,6 @@ const visibleTasks = useMemo(() => {
                 {theme === "dark" ? "☀️ Light" : "🌙 Dark"}
               </button>
 
-              {/* Sign Out */}
               <button
                 onClick={async () => { await dbClient.auth.signOut(); setUser(null); }}
                 className="text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/30 border border-rose-300 dark:border-rose-900/50 text-xs font-medium px-2.5 py-1.5 rounded-lg transition"
@@ -812,7 +819,6 @@ const visibleTasks = useMemo(() => {
           </header>
 
           <div className="flex-1 flex overflow-hidden">
-            {/* Sidebar */}
             <aside className="hidden md:flex w-64 border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-[#0f172a] p-4 flex-col justify-between shrink-0 no-print">
               <div className="space-y-1.5">
                 {[
@@ -848,9 +854,8 @@ const visibleTasks = useMemo(() => {
               </div>
             </aside>
 
-            {/* Main Content */}
             <main className="flex-1 p-4 md:p-6 overflow-y-auto space-y-5 bg-slate-50/50 dark:bg-[#0b1120]">
-              {/* Quick-Add Task Bar with Multi-Project & Dependency Types */}
+              {/* Task Quick-Add Bar */}
               {activeTab === "gantt" && (
                 <form
                   onSubmit={handleAddTask}
@@ -867,7 +872,7 @@ const visibleTasks = useMemo(() => {
                     />
                   </div>
                   <div className="flex-1 min-w-[200px]">
-                    <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">Task Name</label>
+                    <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">Task Deliverable</label>
                     <input
                       type="text"
                       value={qaName}
@@ -902,7 +907,6 @@ const visibleTasks = useMemo(() => {
                       className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-2 py-1.5 text-xs text-slate-900 dark:text-white"
                     />
                   </div>
-                  {/* Cross-Project Predecessor Selector */}
                   <div className="min-w-[150px]">
                     <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">Predecessor (Cross-Project)</label>
                     <select
@@ -920,7 +924,6 @@ const visibleTasks = useMemo(() => {
                       ))}
                     </select>
                   </div>
-                  {/* Dependency Type */}
                   <div className="w-16">
                     <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">Type</label>
                     <select
@@ -934,7 +937,6 @@ const visibleTasks = useMemo(() => {
                       <option value="SF">SF</option>
                     </select>
                   </div>
-                  {/* Resource & Allocation */}
                   <div className="w-24">
                     <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">Alloc %</label>
                     <input
@@ -956,21 +958,22 @@ const visibleTasks = useMemo(() => {
                 </form>
               )}
 
-              {/* Gantt & CPM Table View */}
+              {/* Gantt & CPM Schedule Table View */}
               {activeTab === "gantt" && (
                 <div className="bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-sm">
                   <div className="overflow-x-auto">
                     <table className="w-full border-collapse text-left">
                       <thead>
                         <tr className="border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/90 text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                          <th className="w-12 px-3 py-3 text-center border-r border-slate-200 dark:border-slate-800">DONE</th>
+                          <th className="w-10 px-2 py-3 text-center border-r border-slate-200 dark:border-slate-800">DONE</th>
                           <th className="w-16 px-3 py-3 border-r border-slate-200 dark:border-slate-800">WBS</th>
-                          <th className="min-w-[180px] px-4 py-3 border-r border-slate-200 dark:border-slate-800">TASK NAME</th>
+                          <th className="min-w-[180px] px-4 py-3 border-r border-slate-200 dark:border-slate-800">DELIVERABLE</th>
                           <th className="min-w-[110px] px-3 py-3 border-r border-slate-200 dark:border-slate-800">START</th>
                           <th className="min-w-[110px] px-3 py-3 border-r border-slate-200 dark:border-slate-800">END</th>
                           <th className="w-14 px-2 py-3 text-center border-r border-slate-200 dark:border-slate-800">DUR</th>
                           <th className="min-w-[140px] px-3 py-3 border-r border-slate-200 dark:border-slate-800">RESOURCE & EFFORT</th>
                           <th className="w-20 px-2 py-3 text-center border-r border-slate-200 dark:border-slate-800">FLOAT</th>
+                          <th className="w-10 px-2 py-3 text-center border-r border-slate-200 dark:border-slate-800">DEL</th>
                           <th className="p-0">
                             <div className="flex">
                               {timelineDays.map((d) => (
@@ -991,14 +994,14 @@ const visibleTasks = useMemo(() => {
                       <tbody className="divide-y divide-slate-200 dark:divide-slate-800 text-xs">
                         {cpmSchedule.tasks.length === 0 ? (
                           <tr>
-                            <td colSpan="9" className="text-center py-10 text-slate-400 text-xs">
+                            <td colSpan="10" className="text-center py-10 text-slate-400 text-xs">
                               No tasks in this view. Use the quick-add bar above to define your deliverables!
                             </td>
                           </tr>
                         ) : (
                           cpmSchedule.tasks.map((t) => (
                             <tr key={t.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
-                              <td className="px-3 py-2 text-center border-r border-slate-200 dark:border-slate-800">
+                              <td className="px-2 py-2 text-center border-r border-slate-200 dark:border-slate-800">
                                 <input
                                   type="checkbox"
                                   checked={!!t.done}
@@ -1037,7 +1040,6 @@ const visibleTasks = useMemo(() => {
                                   className="w-10 bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded px-1 py-0.5 text-center font-mono"
                                 />
                               </td>
-                              {/* Resource & Effort Allocation Slider */}
                               <td className="px-3 py-1.5 border-r border-slate-200 dark:border-slate-800">
                                 <div className="flex items-center gap-1.5">
                                   <span className="truncate max-w-[70px] text-[10px] text-slate-500 dark:text-slate-400 font-medium">{t.resource || "Mustafa"}</span>
@@ -1056,7 +1058,15 @@ const visibleTasks = useMemo(() => {
                               <td className="px-2 py-2 text-center border-r border-slate-200 dark:border-slate-800 font-mono text-[11px]">
                                 {t.isCritical ? <span className="text-rose-500 font-bold">0d (CP)</span> : <span className="text-emerald-500">+{t.float}d</span>}
                               </td>
-                              {/* SVG Gantt Bar */}
+                              <td className="px-2 py-2 text-center border-r border-slate-200 dark:border-slate-800">
+                                <button
+                                  onClick={() => deleteTask(t.id)}
+                                  className="text-slate-400 hover:text-rose-500 font-bold px-1"
+                                  title="Delete Task"
+                                >
+                                  ✕
+                                </button>
+                              </td>
                               <td className="p-0 relative">
                                 <div className="flex relative h-10 items-center">
                                   {timelineDays.map((d) => (
@@ -1086,7 +1096,7 @@ const visibleTasks = useMemo(() => {
                 </div>
               )}
 
-              {/* Enterprise Procurement & PO Module */}
+              {/* Procurement & PO Module */}
               {activeTab === "procurement" && (
                 <div className="space-y-4">
                   <form
@@ -1166,6 +1176,7 @@ const visibleTasks = useMemo(() => {
                           <th className="px-3 py-3 text-right">ACTUAL SPEND</th>
                           <th className="px-3 py-3 text-right">VARIANCE</th>
                           <th className="px-4 py-3 text-center">STATUS</th>
+                          <th className="px-3 py-3 text-center">DEL</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
@@ -1194,6 +1205,9 @@ const visibleTasks = useMemo(() => {
                                   <option value="Awarded">Awarded</option>
                                   <option value="Closed">Closed</option>
                                 </select>
+                              </td>
+                              <td className="px-3 py-3 text-center">
+                                <button onClick={() => deletePO(po.id)} className="text-slate-400 hover:text-rose-500 font-bold">✕</button>
                               </td>
                             </tr>
                           );
@@ -1232,90 +1246,214 @@ const visibleTasks = useMemo(() => {
             </main>
           </div>
 
-          {/* Manage / Edit Program & Project Modal */}
+          {/* Manage Modal */}
           {showManageModal && (
             <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-              <form onSubmit={handleSaveEntityEdit} className="bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-800 rounded-3xl p-6 w-full max-w-lg space-y-4 shadow-2xl">
+              <div className="bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-800 rounded-3xl p-6 w-full max-w-xl space-y-4 shadow-2xl">
                 <div className="flex items-center justify-between">
-                  <h3 className="font-bold text-base text-slate-900 dark:text-white">Manage & Rename Portfolio Entities</h3>
+                  <h3 className="font-bold text-base text-slate-900 dark:text-white">
+                    Program & Project Portfolio Manager
+                  </h3>
                   <button type="button" onClick={() => setShowManageModal(false)} className="text-slate-400 hover:text-white">✕</button>
                 </div>
-                <div className="flex gap-2">
+
+                <div className="grid grid-cols-3 gap-2 p-1 bg-slate-100 dark:bg-slate-800/80 rounded-2xl text-xs font-bold">
                   <button
                     type="button"
                     onClick={() => {
-                      const pgm = data.programs.find(p => p.id === selectedProgramId) || data.programs[0];
-                      setEditingEntity({ type: "program", id: pgm.id, code: pgm.code, name: pgm.name, manager: pgm.manager, budget: pgm.budget });
+                      setManageAction("create");
+                      setEditCode(manageType === "program" ? `PGM-0${data.programs.length + 1}` : `PRJ-0${data.projects.length + 1}`);
+                      setEditName("");
                     }}
-                    className={`flex-1 py-2 rounded-xl text-xs font-bold transition ${editingEntity.type === "program" ? "bg-brand-emerald text-brand-navy" : "bg-slate-100 dark:bg-slate-800 text-slate-400"}`}
+                    className={`py-1.5 rounded-xl transition ${manageAction === "create" ? "bg-brand-emerald text-brand-navy shadow-sm" : "text-slate-500"}`}
                   >
-                    Edit Program
+                    + Create New
                   </button>
                   <button
                     type="button"
                     onClick={() => {
-                      const prj = data.projects.find(p => p.id === selectedProjectId) || data.projects[0];
-                      setEditingEntity({ type: "project", id: prj.id, code: prj.code, name: prj.name, methodology: prj.methodology });
+                      setManageAction("edit");
+                      if (manageType === "program") {
+                        const target = data.programs.find(p => p.id === selectedProgramId) || data.programs[0];
+                        setTargetEntityId(target.id);
+                        setEditCode(target.code);
+                        setEditName(target.name);
+                        setEditManager(target.manager);
+                        setEditBudget(target.budget);
+                      } else {
+                        const target = data.projects.find(p => p.id === selectedProjectId) || data.projects[0];
+                        setTargetEntityId(target.id);
+                        setEditCode(target.code);
+                        setEditName(target.name);
+                        setEditMethodology(target.methodology);
+                      }
                     }}
-                    className={`flex-1 py-2 rounded-xl text-xs font-bold transition ${editingEntity.type === "project" ? "bg-brand-emerald text-brand-navy" : "bg-slate-100 dark:bg-slate-800 text-slate-400"}`}
+                    className={`py-1.5 rounded-xl transition ${manageAction === "edit" ? "bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm" : "text-slate-500"}`}
                   >
-                    Edit Project
+                    ✏️ Edit Active
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setManageAction("list")}
+                    className={`py-1.5 rounded-xl transition ${manageAction === "list" ? "bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm" : "text-slate-500"}`}
+                  >
+                    📋 View All & Delete
                   </button>
                 </div>
 
-                <div>
-                  <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Code</label>
-                  <input
-                    type="text"
-                    value={editingEntity.code}
-                    onChange={(e) => setEditingEntity({ ...editingEntity, code: e.target.value })}
-                    className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-xs"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Title / Name</label>
-                  <input
-                    type="text"
-                    value={editingEntity.name}
-                    onChange={(e) => setEditingEntity({ ...editingEntity, name: e.target.value })}
-                    className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-xs"
-                  />
-                </div>
-                {editingEntity.type === "program" ? (
-                  <div>
-                    <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Approved Budget ($)</label>
-                    <input
-                      type="number"
-                      value={editingEntity.budget}
-                      onChange={(e) => setEditingEntity({ ...editingEntity, budget: Number(e.target.value) })}
-                      className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-xs font-mono"
-                    />
-                  </div>
-                ) : (
-                  <div>
-                    <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Methodology</label>
-                    <input
-                      type="text"
-                      value={editingEntity.methodology}
-                      onChange={(e) => setEditingEntity({ ...editingEntity, methodology: e.target.value })}
-                      className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-xs"
-                    />
+                {manageAction !== "list" && (
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setManageType("program");
+                        setEditCode(`PGM-0${data.programs.length + 1}`);
+                        setEditName("");
+                      }}
+                      className={`flex-1 py-1.5 rounded-xl text-xs font-bold transition ${manageType === "program" ? "bg-slate-200 dark:bg-slate-700 text-slate-900 dark:text-white" : "text-slate-400"}`}
+                    >
+                      Program Level
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setManageType("project");
+                        setEditCode(`PRJ-0${data.projects.length + 1}`);
+                        setEditName("");
+                        setEditParentPgmId(selectedProgramId !== "ALL" ? selectedProgramId : data.programs[0]?.id);
+                      }}
+                      className={`flex-1 py-1.5 rounded-xl text-xs font-bold transition ${manageType === "project" ? "bg-slate-200 dark:bg-slate-700 text-slate-900 dark:text-white" : "text-slate-400"}`}
+                    >
+                      Project Level
+                    </button>
                   </div>
                 )}
 
-                <div className="flex gap-2 pt-2">
-                  <button type="submit" className="flex-1 py-2.5 rounded-xl bg-brand-emerald hover:bg-brand-emeraldHover text-brand-navy font-bold text-xs transition">
-                    Save Changes
-                  </button>
-                  <button type="button" onClick={() => setShowManageModal(false)} className="px-4 py-2.5 rounded-xl bg-slate-200 dark:bg-slate-800 text-xs font-semibold">
-                    Cancel
-                  </button>
-                </div>
-              </form>
+                {manageAction !== "list" ? (
+                  <form onSubmit={handleProgramProjectSubmit} className="space-y-3 pt-1">
+                    {manageType === "project" && manageAction === "create" && (
+                      <div>
+                        <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Parent Program</label>
+                        <select
+                          value={editParentPgmId || data.programs[0]?.id}
+                          onChange={(e) => setEditParentPgmId(e.target.value)}
+                          className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-xs"
+                        >
+                          {data.programs.map(pgm => (
+                            <option key={pgm.id} value={pgm.id}>{pgm.code}: {pgm.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+
+                    <div>
+                      <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Code</label>
+                      <input
+                        type="text"
+                        value={editCode}
+                        onChange={(e) => setEditCode(e.target.value)}
+                        placeholder={manageType === "program" ? "PGM-02" : "PRJ-02"}
+                        className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-xs font-mono"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Name / Title</label>
+                      <input
+                        type="text"
+                        value={editName}
+                        onChange={(e) => setEditName(e.target.value)}
+                        placeholder="e.g. Infrastructure Modernization"
+                        className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-xs"
+                      />
+                    </div>
+
+                    {manageType === "program" ? (
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Manager</label>
+                          <input
+                            type="text"
+                            value={editManager}
+                            onChange={(e) => setEditManager(e.target.value)}
+                            className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-xs"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Budget ($)</label>
+                          <input
+                            type="number"
+                            value={editBudget}
+                            onChange={(e) => setEditBudget(Number(e.target.value))}
+                            className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-xs font-mono"
+                          />
+                        </div>
+                      </div>
+                    ) : (
+                      <div>
+                        <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Methodology</label>
+                        <input
+                          type="text"
+                          value={editMethodology}
+                          onChange={(e) => setEditMethodology(e.target.value)}
+                          placeholder="Hybrid Agile, Critical Path, Waterfall"
+                          className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-xs"
+                        />
+                      </div>
+                    )}
+
+                    <div className="flex gap-2 pt-2">
+                      <button type="submit" className="flex-1 py-2.5 rounded-xl bg-brand-emerald hover:bg-brand-emeraldHover text-brand-navy font-bold text-xs transition">
+                        {manageAction === "create" ? `Create ${manageType === "program" ? "Program" : "Project"}` : "Save Changes"}
+                      </button>
+                      <button type="button" onClick={() => setShowManageModal(false)} className="px-4 py-2.5 rounded-xl bg-slate-200 dark:bg-slate-800 text-xs font-semibold">
+                        Cancel
+                      </button>
+                    </div>
+                  </form>
+                ) : (
+                  <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-1">
+                    <div>
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">Existing Programs</h4>
+                      <div className="space-y-1.5">
+                        {data.programs.map(pgm => (
+                          <div key={pgm.id} className="flex items-center justify-between p-2.5 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 text-xs">
+                            <div>
+                              <span className="font-mono font-bold text-brand-emerald">{pgm.code}: </span>
+                              <span className="font-semibold">{pgm.name}</span>
+                              <span className="text-[10px] text-slate-500 ml-2">(${pgm.budget.toLocaleString()})</span>
+                            </div>
+                            <button onClick={() => deleteProgram(pgm.id)} className="text-slate-400 hover:text-rose-500 font-bold px-2 py-1">✕ Delete</button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div>
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">Existing Projects</h4>
+                      <div className="space-y-1.5">
+                        {data.projects.map(prj => {
+                          const parent = data.programs.find(p => p.id === prj.programId);
+                          return (
+                            <div key={prj.id} className="flex items-center justify-between p-2.5 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 text-xs">
+                              <div>
+                                <span className="font-mono font-bold text-indigo-400">{prj.code}: </span>
+                                <span className="font-semibold">{prj.name}</span>
+                                <span className="text-[10px] text-slate-500 ml-2">[{parent?.code || "Unassigned"}]</span>
+                              </div>
+                              <button onClick={() => deleteProject(prj.id)} className="text-slate-400 hover:text-rose-500 font-bold px-2 py-1">✕ Delete</button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
-          {/* Document Generation & Export Modal */}
+          {/* Report Export Modal */}
           {showReportModal && (
             <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
               <div className="bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-800 rounded-3xl p-6 w-full max-w-3xl space-y-4 shadow-2xl max-h-[90vh] flex flex-col">
@@ -1346,7 +1484,7 @@ const visibleTasks = useMemo(() => {
 
                   <div className="grid grid-cols-3 gap-3">
                     <div className="p-3 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700">
-                      <div className="text-[10px] text-slate-400 font-bold uppercase">Total Tasks</div>
+                      <div className="text-[10px] text-slate-400 font-bold uppercase">Total Deliverables</div>
                       <div className="text-lg font-bold">{cpmSchedule.tasks.length}</div>
                     </div>
                     <div className="p-3 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700">
@@ -1354,7 +1492,7 @@ const visibleTasks = useMemo(() => {
                       <div className="text-lg font-bold text-rose-500">{cpmSchedule.criticalCount}</div>
                     </div>
                     <div className="p-3 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700">
-                      <div className="text-[10px] text-slate-400 font-bold uppercase">Procurement Committed</div>
+                      <div className="text-[10px] text-slate-400 font-bold uppercase">Committed Procurement</div>
                       <div className="text-lg font-bold text-emerald-500">
                         ${data.procurements.reduce((acc, p) => acc + (p.committed || 0), 0).toLocaleString()}
                       </div>
