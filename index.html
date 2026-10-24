@@ -12,14 +12,14 @@
   <!-- External App Configuration -->
   <script src="config.js"></script>
 
-  <!-- Branded AI Registry Hub SVG Icon -->
+  <!-- Branded AI Registry Hub SVG Favicon -->
   <script>
     (function() {
       const svgIcon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-        <rect width="512" height="512" rx="120" fill="#0b1120"/>
-        <circle cx="256" cy="256" r="148" fill="none" stroke="#10b981" stroke-width="30" stroke-dasharray="720" stroke-dashoffset="130" stroke-linecap="round"/>
-        <polygon points="256,88 392,368 120,368" fill="none" stroke="#ffffff" stroke-width="28" stroke-linejoin="round"/>
-        <circle cx="256" cy="274" r="34" fill="#10b981"/>
+        <rect width="512" height="512" rx="100" fill="#0b1120"/>
+        <path d="M 256 106 A 150 150 0 1 1 142 354" fill="none" stroke="#10b981" stroke-width="26" stroke-linecap="round"/>
+        <polygon points="256,92 388,364 124,364" fill="none" stroke="#ffffff" stroke-width="26" stroke-linejoin="round" stroke-linecap="round"/>
+        <circle cx="256" cy="272" r="28" fill="#10b981"/>
       </svg>`;
       const iconUrl = "data:image/svg+xml;base64," + btoa(svgIcon);
       const linkIcon = document.createElement("link");
@@ -98,7 +98,7 @@
     const TODAY_ISO = new Date().toISOString().slice(0, 10);
     const THEME_KEY = "apexpms_theme";
 
-    // Alberta & Canadian Statutory Holidays
+    // Canadian & Alberta Statutory Holidays
     const STAT_HOLIDAYS_2026 = [
       { date: "2026-01-01", name: "New Year's Day" },
       { date: "2026-02-16", name: "Family Day" },
@@ -165,7 +165,6 @@
     };
 
     function App() {
-      // Theme State
       const [theme, setTheme] = useState(() => localStorage.getItem(THEME_KEY) || "dark");
 
       useEffect(() => {
@@ -177,18 +176,15 @@
 
       const toggleTheme = () => setTheme(prev => prev === "dark" ? "light" : "dark");
 
-      // Auth State
       const [user, setUser] = useState(null);
       const [authEmail, setAuthEmail] = useState("");
       const [authPassword, setAuthPassword] = useState("");
       const [authMessage, setAuthMessage] = useState("");
       const [isAuthLoading, setIsAuthLoading] = useState(true);
 
-      // Account Dropdown Menu State
       const [showUserMenu, setShowUserMenu] = useState(false);
       const userMenuRef = useRef(null);
 
-      // Close dropdown on outside click
       useEffect(() => {
         const handleClickOutside = (e) => {
           if (userMenuRef.current && !userMenuRef.current.contains(e.target)) {
@@ -199,7 +195,6 @@
         return () => document.removeEventListener("mousedown", handleClickOutside);
       }, []);
 
-      // DB Sync State
       const [syncStatus, setSyncStatus] = useState("Initializing DB...");
       const [lastSyncedAt, setLastSyncedAt] = useState(null);
       const isInitialCloudLoadComplete = useRef(false);
@@ -216,13 +211,13 @@
 
       const [data, setData] = useState(INITIAL_EMPTY_WORKSPACE);
 
-      // Active View Filters
+      // Filters
       const [selectedProgramId, setSelectedProgramId] = useState("ALL");
       const [selectedProjectId, setSelectedProjectId] = useState("ALL");
       const [activeTab, setActiveTab] = useState("gantt");
 
-      // Gantt Zoom & Timeline Scale (Day, Week, Month, Quarter)
-      const [ganttScale, setGanttScale] = useState("day"); // "day" | "week" | "month" | "quarter"
+      // Gantt Zoom & Timeline Scale
+      const [ganttScale, setGanttScale] = useState("day");
       const [showHolidays, setShowHolidays] = useState(true);
 
       // Modals
@@ -232,7 +227,7 @@
 
       // Management Form State
       const [manageAction, setManageAction] = useState("create");
-      const [manageType, setManageType] = useState("project"); // "program" | "project" | "resource"
+      const [manageType, setManageType] = useState("project");
       const [targetEntityId, setTargetEntityId] = useState("");
       const [editCode, setEditCode] = useState("");
       const [editName, setEditName] = useState("");
@@ -243,12 +238,12 @@
       const [newResourceName, setNewResourceName] = useState("");
       const [newResourceRole, setNewResourceRole] = useState("Team Member");
 
-      // Quick-Add Inputs
+      // Quick-Add Inputs with safe string state for typing Decimals
       const [qaType, setQaType] = useState("Task");
       const [qaWbs, setQaWbs] = useState("");
       const [qaName, setQaName] = useState("");
       const [qaStartDate, setQaStartDate] = useState(TODAY_ISO);
-      const [qaDuration, setQaDuration] = useState(1);
+      const [qaDuration, setQaDuration] = useState("1");
       const [qaResource, setQaResource] = useState("Mustafa Nisar");
       const [qaAllocation, setQaAllocation] = useState(100);
 
@@ -277,7 +272,6 @@
         deliveryDate: addDaysISO(TODAY_ISO, 14)
       });
 
-      // DB Auth Session Listener
       useEffect(() => {
         if (!dbClient) {
           setIsAuthLoading(false);
@@ -294,7 +288,6 @@
         return () => subscription.unsubscribe();
       }, [dbClient]);
 
-      // Pull workspace from Cloud DB
       const pullWorkspace = async (activeUser) => {
         if (!dbClient || !activeUser) return;
         try {
@@ -313,13 +306,16 @@
               ...row.state,
               resources: row.state.resources || INITIAL_EMPTY_WORKSPACE.resources,
               risks: row.state.risks || INITIAL_EMPTY_WORKSPACE.risks,
-              tasks: (row.state.tasks || []).map(t => ({
-                ...t,
-                itemType: t.itemType || (Number(t.duration) === 0 ? "Milestone" : "Task"),
-                duration: Number(t.duration !== undefined ? t.duration : 1),
-                resource: t.resource || "Mustafa Nisar",
-                predecessors: t.predecessors || (t.predecessorId ? [{ id: t.predecessorId, type: t.depType || "FS", lag: Number(t.lag || 0) }] : [])
-              }))
+              tasks: (row.state.tasks || []).map(t => {
+                const isM = t.itemType === "Milestone" || Number(t.duration) === 0;
+                return {
+                  ...t,
+                  itemType: isM ? "Milestone" : (t.itemType || "Task"),
+                  duration: Number(t.duration !== undefined ? t.duration : 1),
+                  resource: t.resource || "Mustafa Nisar",
+                  predecessors: t.predecessors || (t.predecessorId ? [{ id: t.predecessorId, type: t.depType || "FS", lag: Number(t.lag || 0) }] : [])
+                };
+              })
             };
             setData(sanitizedState);
             setLastSyncedAt(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
@@ -336,7 +332,6 @@
         }
       };
 
-      // Push workspace to Cloud DB
       const pushWorkspace = async (stateToSave, activeUser) => {
         if (!dbClient || !activeUser || !isInitialCloudLoadComplete.current) return;
         try {
@@ -394,7 +389,6 @@
         }
       };
 
-      // Hierarchical project filtering
       const programProjects = useMemo(() => {
         if (selectedProgramId === "ALL") return data.projects;
         return data.projects.filter(p => p.programId === selectedProgramId);
@@ -413,7 +407,7 @@
         });
       }, [data.tasks, selectedProjectId, selectedProgramId, programProjects]);
 
-      // Float / Decimal PMI Forward & Backward Pass CPM Engine
+      // Float / Decimal CPM Engine
       const cpmSchedule = useMemo(() => {
         if (visibleTasks.length === 0) {
           return { tasks: [], anchorDate: TODAY_ISO, totalSpanDays: 30, criticalCount: 0, rawMap: {} };
@@ -422,7 +416,7 @@
         const taskMap = {};
         data.tasks.forEach(t => {
           const isMilestone = t.itemType === "Milestone" || Number(t.duration) === 0;
-          const dur = isMilestone ? 0 : Math.max(0.125, Number(t.duration || 1));
+          const dur = isMilestone ? 0 : Math.max(0.01, Number(t.duration || 1));
           taskMap[t.id] = {
             ...t,
             itemType: isMilestone ? "Milestone" : (t.itemType || "Task"),
@@ -472,7 +466,7 @@
 
         visibleNodes.forEach(t => {
           t.es = Math.max(0, diffDaysISO(earliestISO, t.esDate));
-          t.ef = t.es + t.duration;
+          t.ef = t.es + (t.itemType === "Milestone" ? 0 : t.duration);
         });
 
         // Backward Pass
@@ -517,7 +511,7 @@
         };
       }, [visibleTasks, data.tasks]);
 
-      // Multi-Scale Timeline Generator (Day, Week, Month, Quarter)
+      // Timeline scale generator
       const timelineUnits = useMemo(() => {
         const totalDays = cpmSchedule.totalSpanDays;
         const anchor = cpmSchedule.anchorDate;
@@ -564,7 +558,6 @@
             };
           });
         } else {
-          // Quarter
           const numQuarters = Math.ceil(totalDays / 90) + 2;
           return Array.from({ length: numQuarters }, (_, i) => {
             const startISO = addDaysISO(anchor, i * 90);
@@ -615,13 +608,14 @@
         }));
       };
 
-      // Item CRUD Handlers
+      // Item CRUD Handlers (Unblocked from erroneous milestone lock)
       const handleAddItem = (e) => {
         e.preventDefault();
         if (!qaName.trim()) return;
         const targetPrjId = selectedProjectId !== "ALL" ? selectedProjectId : (programProjects[0]?.id || data.projects[0]?.id);
         const isMilestone = qaType === "Milestone";
-        const dur = isMilestone ? 0 : Math.max(0.125, Number(qaDuration || 1));
+        const parsedDur = isMilestone ? 0 : Math.max(0.01, parseFloat(qaDuration) || 1);
+
         const newItem = {
           id: "tsk-" + Date.now(),
           projectId: targetPrjId,
@@ -629,8 +623,8 @@
           wbs: qaWbs.trim() || `1.${visibleTasks.length + 1}`,
           name: qaName.trim(),
           startDate: qaStartDate || TODAY_ISO,
-          endDate: isMilestone ? (qaStartDate || TODAY_ISO) : addDaysISO(qaStartDate || TODAY_ISO, Math.ceil(dur)),
-          duration: dur,
+          endDate: isMilestone ? (qaStartDate || TODAY_ISO) : addDaysISO(qaStartDate || TODAY_ISO, Math.ceil(parsedDur)),
+          duration: parsedDur,
           predecessors: [],
           resource: qaResource,
           allocation: Number(qaAllocation || 100),
@@ -645,28 +639,55 @@
         setQaWbs("");
       };
 
+      // Robust Field Update: Handles switching between Milestone & Task cleanly
       const updateTaskField = (taskId, field, value) => {
         setData(prev => ({
           ...prev,
           tasks: prev.tasks.map(t => {
             if (t.id !== taskId) return t;
-            const updated = { ...t, [field]: value };
-            if (field === "itemType" && value === "Milestone") {
-              updated.duration = 0;
-              updated.endDate = updated.startDate;
-            } else if (field === "startDate") {
-              updated.endDate = updated.itemType === "Milestone" ? value : addDaysISO(value, Math.ceil(updated.duration));
+            const updated = { ...t };
+
+            if (field === "itemType") {
+              updated.itemType = value;
+              if (value === "Milestone") {
+                updated.duration = 0;
+                updated.endDate = updated.startDate;
+              } else {
+                // Restoring from Milestone to Task: ensure duration is at least 0.5 or 1 day
+                if (Number(updated.duration) <= 0) {
+                  updated.duration = 1;
+                  updated.endDate = addDaysISO(updated.startDate, 1);
+                }
+              }
             } else if (field === "duration") {
-              const d = Math.max(0, Number(value || 0));
-              updated.duration = d;
-              if (d === 0) updated.itemType = "Milestone";
-              updated.endDate = addDaysISO(updated.startDate || TODAY_ISO, Math.ceil(d));
+              const parsed = parseFloat(value);
+              if (isNaN(parsed) || parsed <= 0) {
+                updated.duration = 0;
+                updated.itemType = "Milestone";
+                updated.endDate = updated.startDate;
+              } else {
+                updated.duration = parsed;
+                updated.itemType = "Task";
+                updated.endDate = addDaysISO(updated.startDate, Math.ceil(parsed));
+              }
+            } else if (field === "startDate") {
+              updated.startDate = value;
+              updated.endDate = updated.itemType === "Milestone" ? value : addDaysISO(value, Math.ceil(updated.duration));
             } else if (field === "endDate") {
+              updated.endDate = value;
               const diff = diffDaysISO(updated.startDate || TODAY_ISO, value);
-              if (diff >= 0) updated.duration = diff;
-              if (diff === 0) updated.itemType = "Milestone";
+              if (diff > 0) {
+                updated.duration = diff;
+                updated.itemType = "Task";
+              } else {
+                updated.duration = 0;
+                updated.itemType = "Milestone";
+              }
             } else if (field === "done") {
+              updated.done = value;
               updated.status = value ? "Done" : "In Progress";
+            } else {
+              updated[field] = value;
             }
             return updated;
           })
@@ -888,16 +909,20 @@
             <div className="max-w-md w-full bg-[#111827] border border-slate-800 rounded-3xl p-8 shadow-2xl space-y-6">
               <div className="flex items-center gap-3">
                 <div className="w-12 h-12 rounded-2xl bg-[#0b1120] border border-brand-emerald flex items-center justify-center shadow-lg shadow-emerald-500/10">
-                  <span className="text-brand-emerald font-black text-xl">▲</span>
+                  <svg viewBox="0 0 512 512" className="w-8 h-8">
+                    <path d="M 256 106 A 150 150 0 1 1 142 354" fill="none" stroke="#10b981" strokeWidth="32" strokeLinecap="round"/>
+                    <polygon points="256,92 388,364 124,364" fill="none" stroke="#ffffff" strokeWidth="32" strokeLinejoin="round" strokeLinecap="round"/>
+                    <circle cx="256" cy="272" r="34" fill="#10b981"/>
+                  </svg>
                 </div>
                 <div>
                   <h1 className="text-xl font-bold tracking-tight text-white">ApexPPM</h1>
-                  <p className="text-xs text-brand-emerald font-medium">Enterprise Program & Portfolio Management</p>
+                  <p className="text-xs text-brand-emerald font-medium">AI Registry Hub PPM Suite</p>
                 </div>
               </div>
 
               <div className="text-xs text-slate-400 leading-relaxed">
-                Welcome to your multi-tenant PPM suite. Full CPM dependency arrows, milestone scheduling, RAID logs, and procurement controls powered by your secure DB.
+                Welcome to your multi-tenant PPM suite. Decimal duration scheduling, CPM dependency networks, RAID logs, and procurement controls powered by your secure DB.
               </div>
 
               <div className="space-y-3 pt-2">
@@ -945,15 +970,15 @@
 
       return (
         <div className="min-h-screen flex flex-col transition-colors duration-200">
-          {/* Top Header with AI Registry Hub Logo and GitHub/Supabase-Style Profile Menu */}
+          {/* Top Header with Exact Vector Logo Matching AI Registry Hub */}
           <header className="border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-[#111827] px-4 md:px-6 py-3 flex items-center justify-between gap-4 shadow-sm no-print">
             <div className="flex items-center gap-3">
-              {/* Branded AI Registry Hub Logo Icon */}
-              <div className="w-10 h-10 rounded-2xl bg-[#0b1120] border border-brand-emerald/80 flex items-center justify-center p-1.5 shadow-sm">
+              {/* Exact AI Registry Hub Vector Logo Tile */}
+              <div className="w-10 h-10 rounded-2xl bg-[#0b1120] border border-slate-800 flex items-center justify-center p-1.5 shadow-md">
                 <svg viewBox="0 0 512 512" className="w-full h-full">
-                  <circle cx="256" cy="256" r="148" fill="none" stroke="#10b981" strokeWidth="36" strokeDasharray="720" strokeDashoffset="130" strokeLinecap="round"/>
-                  <polygon points="256,88 392,368 120,368" fill="none" stroke="#ffffff" strokeWidth="32" strokeLinejoin="round"/>
-                  <circle cx="256" cy="274" r="38" fill="#10b981"/>
+                  <path d="M 256 106 A 150 150 0 1 1 142 354" fill="none" stroke="#10b981" strokeWidth="32" strokeLinecap="round"/>
+                  <polygon points="256,92 388,364 124,364" fill="none" stroke="#ffffff" strokeWidth="32" strokeLinejoin="round" strokeLinecap="round"/>
+                  <circle cx="256" cy="272" r="34" fill="#10b981"/>
                 </svg>
               </div>
               <div>
@@ -964,7 +989,7 @@
                   </span>
                 </div>
                 <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                  PMI Portfolio, Program & CPM Scheduling Suite
+                  AI Registry Hub Program & Critical Path Scheduling
                 </div>
               </div>
             </div>
@@ -1029,7 +1054,6 @@
                 </div>
               </button>
 
-              {/* GitHub / Supabase Styled Dropdown Flyout */}
               {showUserMenu && (
                 <div className="absolute right-0 mt-2 w-64 bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl py-2 z-50 text-xs">
                   <div className="px-4 py-2 border-b border-slate-200 dark:border-slate-800">
@@ -1110,7 +1134,7 @@
 
             {/* Main Workspace Area */}
             <main className="flex-1 p-4 md:p-6 overflow-y-auto space-y-5 bg-slate-50/50 dark:bg-[#0b1120]">
-              {/* Quick-Add Bar with Sub-Day Duration Support */}
+              {/* Deliverables Quick-Add Bar with Arbitrary Decimal / Sub-Day Durations */}
               {activeTab === "gantt" && (
                 <form
                   onSubmit={handleAddItem}
@@ -1120,7 +1144,11 @@
                     <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">Type</label>
                     <select
                       value={qaType}
-                      onChange={(e) => setQaType(e.target.value)}
+                      onChange={(e) => {
+                        setQaType(e.target.value);
+                        if (e.target.value === "Milestone") setQaDuration("0");
+                        else if (qaDuration === "0") setQaDuration("1");
+                      }}
                       className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-2 py-1.5 text-xs text-slate-900 dark:text-white font-semibold"
                     >
                       <option value="Task">Task</option>
@@ -1157,19 +1185,19 @@
                     />
                   </div>
                   {qaType !== "Milestone" && (
-                    <div className="w-20">
-                      <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">Days (e.g. 0.5)</label>
+                    <div className="w-24">
+                      <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">Days (0.5, 1, 2)</label>
                       <input
                         type="number"
-                        step="0.25"
-                        min="0.125"
+                        step="any"
+                        min="0"
                         value={qaDuration}
-                        onChange={(e) => setQaDuration(Math.max(0.125, Number(e.target.value || 0.25)))}
+                        onChange={(e) => setQaDuration(e.target.value)}
+                        placeholder="1"
                         className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-2 py-1.5 text-xs text-slate-900 dark:text-white font-mono"
                       />
                     </div>
                   )}
-                  {/* Dynamic Resource Selector */}
                   <div className="min-w-[130px]">
                     <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">Resource</label>
                     <select
@@ -1203,7 +1231,7 @@
                 </form>
               )}
 
-              {/* CARD 1: Deliverables Table Grid (Top Section) */}
+              {/* CARD 1: Deliverables Table Grid */}
               {activeTab === "gantt" && (
                 <div className="bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-sm">
                   <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-800 flex justify-between items-center bg-slate-50/50 dark:bg-slate-900/50">
@@ -1226,7 +1254,7 @@
                           <th className="min-w-[180px] px-3 py-3 border-r border-slate-200 dark:border-slate-800">PREDECESSORS</th>
                           <th className="min-w-[110px] px-2 py-3 border-r border-slate-200 dark:border-slate-800">START</th>
                           <th className="min-w-[110px] px-2 py-3 border-r border-slate-200 dark:border-slate-800">END</th>
-                          <th className="w-16 px-1 py-3 text-center border-r border-slate-200 dark:border-slate-800">DUR</th>
+                          <th className="w-18 px-1 py-3 text-center border-r border-slate-200 dark:border-slate-800">DUR (DAYS)</th>
                           <th className="min-w-[140px] px-2 py-3 border-r border-slate-200 dark:border-slate-800">RESOURCE & EFFORT</th>
                           <th className="w-16 px-1 py-3 text-center border-r border-slate-200 dark:border-slate-800">FLOAT</th>
                           <th className="w-10 px-1 py-3 text-center">DEL</th>
@@ -1297,7 +1325,6 @@
                                 {t.name}
                               </td>
 
-                              {/* Multi-Predecessor Tags & Management */}
                               <td className="px-2 py-1.5 border-r border-slate-200 dark:border-slate-800">
                                 <div className="flex flex-wrap items-center gap-1">
                                   {(t.predecessors || []).map((pRef, pIdx) => {
@@ -1341,22 +1368,18 @@
                                 />
                               </td>
 
+                              {/* Unlocked Duration Field: supports 0.5, 1, 2 days without step errors */}
                               <td className="px-1 py-1.5 text-center border-r border-slate-200 dark:border-slate-800">
-                                {t.itemType === "Milestone" ? (
-                                  <span className="font-mono text-[10px] text-brand-emerald font-bold">0d</span>
-                                ) : (
-                                  <input
-                                    type="number"
-                                    step="0.25"
-                                    min="0.125"
-                                    value={t.duration}
-                                    onChange={(e) => updateTaskField(t.id, "duration", e.target.value)}
-                                    className="w-14 bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded px-1 py-0.5 text-center font-mono"
-                                  />
-                                )}
+                                <input
+                                  type="number"
+                                  step="any"
+                                  min="0"
+                                  value={t.itemType === "Milestone" ? 0 : t.duration}
+                                  onChange={(e) => updateTaskField(t.id, "duration", e.target.value)}
+                                  className="w-16 bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded px-1.5 py-0.5 text-center font-mono text-xs"
+                                />
                               </td>
 
-                              {/* Resource Allocation Dropdown */}
                               <td className="px-2 py-1.5 border-r border-slate-200 dark:border-slate-800">
                                 <div className="flex items-center gap-1">
                                   <select
@@ -1403,7 +1426,7 @@
                 </div>
               )}
 
-              {/* CARD 2: Dedicated Full-Width Gantt Chart with SVG Arrows & Multi-Scale Zoom (Below Table) */}
+              {/* CARD 2: Dedicated Full-Width Gantt Chart with SVG Arrows & Multi-Scale Zoom */}
               {activeTab === "gantt" && (
                 <div className="bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-sm">
                   <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-800 flex flex-wrap justify-between items-center gap-3 bg-slate-50/50 dark:bg-slate-900/50">
@@ -1416,7 +1439,6 @@
                       </div>
                     </div>
 
-                    {/* Timeline Scale Zoom Switcher (Day, Week, Month, Quarter) */}
                     <div className="flex items-center gap-2">
                       <div className="flex p-0.5 bg-slate-200 dark:bg-slate-800 rounded-lg text-[10px] font-semibold">
                         {["day", "week", "month", "quarter"].map((s) => (
@@ -1507,7 +1529,7 @@
                       <div className="space-y-2">
                         {cpmSchedule.tasks.map((t) => {
                           const leftPos = 240 + t.es * pxPerDay;
-                          const widthPx = Math.max(16, t.duration * pxPerDay - 4);
+                          const widthPx = Math.max(16, (t.itemType === "Milestone" ? 0 : t.duration) * pxPerDay - 4);
                           const isMilestone = t.itemType === "Milestone";
                           return (
                             <div key={t.id} className="flex items-center h-8 relative hover:bg-slate-50 dark:hover:bg-slate-800/30 rounded">
@@ -1572,7 +1594,7 @@
                         type="text"
                         value={newRisk.title}
                         onChange={(e) => setNewRisk({ ...newRisk, title: e.target.value })}
-                        placeholder="e.g. Rate limiting on foundation model endpoints"
+                        placeholder="e.g. Schedule delay due to GPU allocation lead times"
                         className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-1.5 text-xs"
                       />
                     </div>
