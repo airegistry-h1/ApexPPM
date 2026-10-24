@@ -9,7 +9,7 @@
   <meta name="apple-mobile-web-app-title" content="ApexPPM" />
   <title>ApexPPM — Enterprise Portfolio & Program Manager</title>
 
-  <!-- External App Configuration (Reads separate config.js) -->
+  <!-- External App Configuration -->
   <script src="config.js"></script>
 
   <!-- Branded SVG Icon (Matching AI Registry Hub Triangle & Circle) -->
@@ -91,7 +91,7 @@
   <script type="text/babel">
     const { useState, useEffect, useMemo, useRef } = React;
 
-    // Load credentials from config.js or use verified publishable key
+    // Load credentials strictly from config.js (fallback to production DB)
     const DEFAULT_DB_URL = window.APEX_CONFIG?.DB_URL || "https://tzqbzzdctwdyvwvyvwzk.supabase.co";
     const DEFAULT_DB_ANON_KEY = window.APEX_CONFIG?.DB_ANON_KEY || "sb_publishable_Jve6BGkRJUrhkX8vMlDJUA_m_4RoWpT";
 
@@ -143,6 +143,7 @@
     };
 
     function App() {
+      // Theme State (Dark / Light)
       const [theme, setTheme] = useState(() => localStorage.getItem(THEME_KEY) || "dark");
 
       useEffect(() => {
@@ -165,7 +166,7 @@
       const [syncStatus, setSyncStatus] = useState("Initializing DB...");
       const [lastSyncedAt, setLastSyncedAt] = useState(null);
 
-      // Guard: Strictly prevents premature local state from overwriting cloud DB
+      // CRITICAL GUARDS: Strictly prevent blank state overwrites on initial load
       const isInitialCloudLoadComplete = useRef(false);
       const isPullingRef = useRef(false);
 
@@ -189,7 +190,7 @@
       const [showManageModal, setShowManageModal] = useState(false);
       const [showReportModal, setShowReportModal] = useState(false);
 
-      // CRUD Form State
+      // Program/Project CRUD Form State
       const [manageAction, setManageAction] = useState("create");
       const [manageType, setManageType] = useState("program");
       const [targetEntityId, setTargetEntityId] = useState("");
@@ -348,7 +349,7 @@
         });
       }, [data.tasks, selectedProjectId, selectedProgramId, programProjects]);
 
-      // Critical Path Method Forward & Backward Pass Engine
+      // PMI Critical Path Method Engine with Automatic Date Cascading
       const cpmSchedule = useMemo(() => {
         if (visibleTasks.length === 0) {
           return { tasks: [], anchorDate: TODAY_ISO, totalSpanDays: 30, criticalCount: 0 };
@@ -366,6 +367,7 @@
           };
         });
 
+        // Forward Pass: Cascading dependencies
         let changed = true;
         let passes = 0;
         while (changed && passes < 25) {
@@ -400,6 +402,7 @@
           t.ef = t.es + t.duration;
         });
 
+        // Backward Pass: Float & Critical Path
         const maxEF = Math.max(...visibleNodes.map(n => n.ef), 1);
         visibleNodes.forEach(n => { n.lf = maxEF; n.ls = n.lf - n.duration; });
 
@@ -444,7 +447,7 @@
         });
       }, [cpmSchedule.anchorDate, cpmSchedule.totalSpanDays]);
 
-      // Effort-driven resource allocation
+      // Effort-Driven Scheduling: Adjust duration based on allocation %
       const handleAllocationChange = (taskId, newAlloc) => {
         const alloc = Math.max(10, Math.min(200, Number(newAlloc || 100)));
         setData(prev => ({
@@ -459,7 +462,7 @@
         }));
       };
 
-      // Task CRUD Operations
+      // Task CRUD: Create
       const handleAddTask = (e) => {
         e.preventDefault();
         if (!qaName.trim()) return;
@@ -496,6 +499,7 @@
         setQaWbs("");
       };
 
+      // Task CRUD: Update
       const updateTaskField = (taskId, field, value) => {
         setData(prev => ({
           ...prev,
@@ -520,6 +524,7 @@
         }));
       };
 
+      // Task CRUD: Delete
       const deleteTask = (taskId) => {
         if (!confirm("Are you sure you want to delete this deliverable?")) return;
         setData(prev => ({
@@ -530,7 +535,7 @@
         }));
       };
 
-      // Program & Project CRUD
+      // Program/Project CRUD: Create & Update
       const handleProgramProjectSubmit = (e) => {
         e.preventDefault();
         if (!editName.trim()) return;
@@ -589,6 +594,7 @@
         setShowManageModal(false);
       };
 
+      // Program CRUD: Delete
       const deleteProgram = (pgmId) => {
         if (data.programs.length <= 1) {
           alert("Cannot delete the only remaining program. Create another program first.");
@@ -606,6 +612,7 @@
         setSelectedProjectId("ALL");
       };
 
+      // Project CRUD: Delete
       const deleteProject = (prjId) => {
         if (data.projects.length <= 1) {
           alert("Cannot delete the only remaining project. Create another project first.");
@@ -656,6 +663,7 @@
         }));
       };
 
+      // Export for Google Docs
       const copyReportToClipboard = () => {
         const reportElement = document.getElementById("executive-report-content");
         if (!reportElement) return;
@@ -958,7 +966,7 @@
                 </form>
               )}
 
-              {/* Gantt & CPM Schedule Table View */}
+              {/* Gantt & CPM Schedule Table View with INLINE Predecessor & Dependency Controls */}
               {activeTab === "gantt" && (
                 <div className="bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-sm">
                   <div className="overflow-x-auto">
@@ -966,14 +974,16 @@
                       <thead>
                         <tr className="border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/90 text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
                           <th className="w-10 px-2 py-3 text-center border-r border-slate-200 dark:border-slate-800">DONE</th>
-                          <th className="w-16 px-3 py-3 border-r border-slate-200 dark:border-slate-800">WBS</th>
-                          <th className="min-w-[180px] px-4 py-3 border-r border-slate-200 dark:border-slate-800">DELIVERABLE</th>
-                          <th className="min-w-[110px] px-3 py-3 border-r border-slate-200 dark:border-slate-800">START</th>
-                          <th className="min-w-[110px] px-3 py-3 border-r border-slate-200 dark:border-slate-800">END</th>
-                          <th className="w-14 px-2 py-3 text-center border-r border-slate-200 dark:border-slate-800">DUR</th>
-                          <th className="min-w-[140px] px-3 py-3 border-r border-slate-200 dark:border-slate-800">RESOURCE & EFFORT</th>
-                          <th className="w-20 px-2 py-3 text-center border-r border-slate-200 dark:border-slate-800">FLOAT</th>
-                          <th className="w-10 px-2 py-3 text-center border-r border-slate-200 dark:border-slate-800">DEL</th>
+                          <th className="w-14 px-2 py-3 border-r border-slate-200 dark:border-slate-800">WBS</th>
+                          <th className="min-w-[170px] px-3 py-3 border-r border-slate-200 dark:border-slate-800">DELIVERABLE</th>
+                          <th className="min-w-[140px] px-2 py-3 border-r border-slate-200 dark:border-slate-800">PREDECESSOR</th>
+                          <th className="w-16 px-2 py-3 border-r border-slate-200 dark:border-slate-800 text-center">TYPE</th>
+                          <th className="min-w-[105px] px-2 py-3 border-r border-slate-200 dark:border-slate-800">START</th>
+                          <th className="min-w-[105px] px-2 py-3 border-r border-slate-200 dark:border-slate-800">END</th>
+                          <th className="w-12 px-1 py-3 text-center border-r border-slate-200 dark:border-slate-800">DUR</th>
+                          <th className="min-w-[130px] px-2 py-3 border-r border-slate-200 dark:border-slate-800">RESOURCE & EFFORT</th>
+                          <th className="w-16 px-1 py-3 text-center border-r border-slate-200 dark:border-slate-800">FLOAT</th>
+                          <th className="w-10 px-1 py-3 text-center border-r border-slate-200 dark:border-slate-800">DEL</th>
                           <th className="p-0">
                             <div className="flex">
                               {timelineDays.map((d) => (
@@ -994,7 +1004,7 @@
                       <tbody className="divide-y divide-slate-200 dark:divide-slate-800 text-xs">
                         {cpmSchedule.tasks.length === 0 ? (
                           <tr>
-                            <td colSpan="10" className="text-center py-10 text-slate-400 text-xs">
+                            <td colSpan="12" className="text-center py-10 text-slate-400 text-xs">
                               No tasks in this view. Use the quick-add bar above to define your deliverables!
                             </td>
                           </tr>
@@ -1009,29 +1019,62 @@
                                   className="w-4 h-4 rounded accent-brand-emerald cursor-pointer"
                                 />
                               </td>
-                              <td className="px-3 py-2 border-r border-slate-200 dark:border-slate-800 font-mono text-[11px]">
+                              <td className="px-2 py-2 border-r border-slate-200 dark:border-slate-800 font-mono text-[11px]">
                                 {t.wbs}
                               </td>
-                              <td className="px-4 py-2 border-r border-slate-200 dark:border-slate-800 font-medium text-slate-900 dark:text-white">
+                              <td className="px-3 py-2 border-r border-slate-200 dark:border-slate-800 font-medium text-slate-900 dark:text-white">
                                 {t.name}
                               </td>
+
+                              {/* INLINE PREDECESSOR SELECTOR */}
                               <td className="px-2 py-1.5 border-r border-slate-200 dark:border-slate-800">
+                                <select
+                                  value={t.predecessorId || ""}
+                                  onChange={(e) => updateTaskField(t.id, "predecessorId", e.target.value)}
+                                  className="w-full bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded px-1.5 py-0.5 text-[11px] text-slate-900 dark:text-white truncate"
+                                >
+                                  <option value="">None</option>
+                                  {data.projects.map(prj => (
+                                    <optgroup key={prj.id} label={`${prj.code}: ${prj.name}`}>
+                                      {data.tasks.filter(other => other.id !== t.id && other.projectId === prj.id).map(other => (
+                                        <option key={other.id} value={other.id}>{other.wbs} {other.name}</option>
+                                      ))}
+                                    </optgroup>
+                                  ))}
+                                </select>
+                              </td>
+
+                              {/* INLINE DEPENDENCY TYPE SELECTOR */}
+                              <td className="px-1 py-1.5 border-r border-slate-200 dark:border-slate-800 text-center">
+                                <select
+                                  value={t.depType || "FS"}
+                                  onChange={(e) => updateTaskField(t.id, "depType", e.target.value)}
+                                  className="bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded px-1 py-0.5 text-[10px] font-mono text-slate-900 dark:text-white"
+                                >
+                                  <option value="FS">FS</option>
+                                  <option value="SS">SS</option>
+                                  <option value="FF">FF</option>
+                                  <option value="SF">SF</option>
+                                </select>
+                              </td>
+
+                              <td className="px-1.5 py-1.5 border-r border-slate-200 dark:border-slate-800">
                                 <input
                                   type="date"
                                   value={t.esDate}
                                   onChange={(e) => updateTaskField(t.id, "startDate", e.target.value)}
-                                  className="bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded px-1.5 py-0.5 text-[11px]"
+                                  className="bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded px-1 py-0.5 text-[11px]"
                                 />
                               </td>
-                              <td className="px-2 py-1.5 border-r border-slate-200 dark:border-slate-800">
+                              <td className="px-1.5 py-1.5 border-r border-slate-200 dark:border-slate-800">
                                 <input
                                   type="date"
                                   value={t.efDate}
                                   onChange={(e) => updateTaskField(t.id, "endDate", e.target.value)}
-                                  className="bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded px-1.5 py-0.5 text-[11px]"
+                                  className="bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded px-1 py-0.5 text-[11px]"
                                 />
                               </td>
-                              <td className="px-2 py-1.5 text-center border-r border-slate-200 dark:border-slate-800">
+                              <td className="px-1 py-1.5 text-center border-r border-slate-200 dark:border-slate-800">
                                 <input
                                   type="number"
                                   min="1"
@@ -1040,9 +1083,9 @@
                                   className="w-10 bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded px-1 py-0.5 text-center font-mono"
                                 />
                               </td>
-                              <td className="px-3 py-1.5 border-r border-slate-200 dark:border-slate-800">
-                                <div className="flex items-center gap-1.5">
-                                  <span className="truncate max-w-[70px] text-[10px] text-slate-500 dark:text-slate-400 font-medium">{t.resource || "Mustafa"}</span>
+                              <td className="px-2 py-1.5 border-r border-slate-200 dark:border-slate-800">
+                                <div className="flex items-center gap-1">
+                                  <span className="truncate max-w-[65px] text-[10px] text-slate-500 dark:text-slate-400 font-medium">{t.resource || "Mustafa"}</span>
                                   <select
                                     value={t.allocation || 100}
                                     onChange={(e) => handleAllocationChange(t.id, e.target.value)}
@@ -1055,10 +1098,10 @@
                                   </select>
                                 </div>
                               </td>
-                              <td className="px-2 py-2 text-center border-r border-slate-200 dark:border-slate-800 font-mono text-[11px]">
+                              <td className="px-1 py-2 text-center border-r border-slate-200 dark:border-slate-800 font-mono text-[11px]">
                                 {t.isCritical ? <span className="text-rose-500 font-bold">0d (CP)</span> : <span className="text-emerald-500">+{t.float}d</span>}
                               </td>
-                              <td className="px-2 py-2 text-center border-r border-slate-200 dark:border-slate-800">
+                              <td className="px-1 py-2 text-center border-r border-slate-200 dark:border-slate-800">
                                 <button
                                   onClick={() => deleteTask(t.id)}
                                   className="text-slate-400 hover:text-rose-500 font-bold px-1"
@@ -1246,7 +1289,7 @@
             </main>
           </div>
 
-          {/* Manage Modal */}
+          {/* Program & Project CRUD Modal */}
           {showManageModal && (
             <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
               <div className="bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-800 rounded-3xl p-6 w-full max-w-xl space-y-4 shadow-2xl">
@@ -1453,7 +1496,7 @@
             </div>
           )}
 
-          {/* Report Export Modal */}
+          {/* Executive Document Generation & Export Modal */}
           {showReportModal && (
             <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
               <div className="bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-800 rounded-3xl p-6 w-full max-w-3xl space-y-4 shadow-2xl max-h-[90vh] flex flex-col">
