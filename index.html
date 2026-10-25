@@ -267,8 +267,8 @@
       const [selectedProjectId, setSelectedProjectId] = useState("ALL");
       const [activeTab, setActiveTab] = useState("gantt");
 
-      // Heatmap View Mode: "hours" or "percentage"
-      const [heatmapMetric, setHeatmapMetric] = useState("hours"); // "hours" | "percentage"
+      // Heatmap Metric: "hours" or "percentage"
+      const [heatmapMetric, setHeatmapMetric] = useState("hours");
 
       // Gantt Zoom & Timeline Scale & Holiday Region Selector
       const [ganttScale, setGanttScale] = useState("day");
@@ -307,7 +307,7 @@
       const [editMethodology, setEditMethodology] = useState("Hybrid Agile");
       const [editParentPgmId, setEditParentPgmId] = useState("");
 
-      // Resource / Team Form State with Daily Hours and Weekly Schedule
+      // Resource / Team Form State
       const [newResourceName, setNewResourceName] = useState("");
       const [newResourceRole, setNewResourceRole] = useState("Team Member");
       const [newResourceHours, setNewResourceHours] = useState(10);
@@ -342,7 +342,6 @@
         }
       }, [data.resources]);
 
-      // Helper to lookup resource capacity
       const getResourceCapacity = (resourceName) => {
         const found = (data.resources || []).find(r => r.name === resourceName);
         if (found) {
@@ -357,7 +356,6 @@
         };
       };
 
-      // Populators for Edit Active
       const loadProjectForEdit = (prjId) => {
         const prj = data.projects.find(p => p.id === prjId) || data.projects[0];
         if (prj) {
@@ -415,7 +413,7 @@
       });
 
       // Procurement Quick-Add State
-      const [newPO, setNewPO] = useState({
+      const newPOState = {
         poNumber: `PO-${new Date().getFullYear()}-${String(Math.floor(Math.random() * 900) + 100)}`,
         vendor: "",
         category: "Software License",
@@ -425,7 +423,8 @@
         status: "Draft",
         terms: "Net 30",
         deliveryDate: addDaysISO(TODAY_ISO, 14)
-      });
+      };
+      const [newPO, setNewPO] = useState(newPOState);
 
       useEffect(() => {
         if (!dbClient) {
@@ -760,7 +759,7 @@
         };
       }, [visibleTasks, data.tasks]);
 
-      // UNIFIED RESOURCE LOADING HEATMAP: Computes exact Daily Hours & Capacity Percentage against each worker's base
+      // Resource Loading Heatmap
       const resourceLoadingMap = useMemo(() => {
         const loading = {};
         (data.resources || []).forEach(r => {
@@ -772,7 +771,7 @@
           };
         });
 
-        // 1. Ingest Project Tasks
+        // Ingest Project Tasks
         data.tasks.forEach(task => {
           if (task.done || task.itemType === "Milestone" || task.itemType === "Summary") return;
           const start = task.startDate || TODAY_ISO;
@@ -790,7 +789,6 @@
               if (!loading[rName].days[dateISO]) {
                 loading[rName].days[dateISO] = { totalHours: 0, projectHours: 0, opsHours: 0, items: [] };
               }
-              // Calculate daily hours
               const dailyH = asgn.dailyHours !== undefined
                 ? Number(asgn.dailyHours)
                 : Math.round((cap.dailyHours * (Number(asgn.allocation || 100) / 100)) * 10) / 10;
@@ -807,7 +805,7 @@
           }
         });
 
-        // 2. Ingest Ongoing Operational Cadences
+        // Ingest Operations
         const totalHorizonDays = cpmSchedule.totalSpanDays || 105;
         const anchorISO = cpmSchedule.anchorDate || TODAY_ISO;
 
@@ -818,7 +816,7 @@
           for (let d = 0; d < totalHorizonDays; d++) {
             const dateISO = addDaysISO(anchorISO, d);
             const dt = parseISO(dateISO);
-            const dayOfWeek = dt.getDay(); // 0 = Sun, 1 = Mon ... 6 = Sat
+            const dayOfWeek = dt.getDay();
 
             let runsToday = false;
             if (op.cadence === "daily_7days") {
@@ -856,12 +854,11 @@
           }
         });
 
-        // Compute total over-allocation occurrences comparing against each resource's custom daily capacity
         Object.keys(loading).forEach(rName => {
           let overCount = 0;
-          const maxDailyCap = loading[rName].capacity.dailyHours;
+          const maxDailyH = loading[rName].capacity.dailyHours;
           Object.values(loading[rName].days).forEach(day => {
-            if (day.totalHours > maxDailyCap) overCount++;
+            if (day.totalHours > maxDailyH) overCount++;
           });
           loading[rName].totalOverAllocDays = overCount;
         });
@@ -977,7 +974,6 @@
 
         const verifiedStart = qaStartDate || TODAY_ISO;
         const verifiedEnd = isMilestone ? verifiedStart : addDaysISO(verifiedStart, Math.ceil(parsedDur));
-
         const hoursVal = Number(qaHoursPerDay || (cap.dailyHours * (Number(qaAllocation || 100) / 100)));
 
         const newItem = {
@@ -1009,7 +1005,7 @@
         setQaWbs("");
       };
 
-      // Field Update with Dual-Mode Hours <-> Allocation Sync
+      // Field Update
       const updateTaskField = (taskId, field, value) => {
         setData(prev => ({
           ...prev,
@@ -1154,7 +1150,7 @@
         }));
       };
 
-      // Full CRUD Submit Handler for Programs, Projects, Resources & Team Invites
+      // Full CRUD Submit Handler
       const handleProgramProjectSubmit = async (e) => {
         e.preventDefault();
 
@@ -1608,7 +1604,7 @@
 
             {/* Main Workspace Area */}
             <main className="flex-1 p-4 md:p-6 overflow-y-auto space-y-5 bg-slate-50/50 dark:bg-[#0b1120]">
-              {/* Deliverables Quick-Add Bar with Linked Hours & Allocation */}
+              {/* Deliverables Quick-Add Bar */}
               {activeTab === "gantt" && (
                 <form
                   onSubmit={handleAddItem}
@@ -1690,7 +1686,6 @@
                       ))}
                     </select>
                   </div>
-                  {/* Linked Hours/Day */}
                   <div className="w-20">
                     <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">Hours/Day</label>
                     <input
@@ -1708,7 +1703,6 @@
                       className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-2 py-1.5 text-xs text-slate-900 dark:text-white font-mono text-center"
                     />
                   </div>
-                  {/* Linked Alloc % */}
                   <div className="w-20">
                     <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">Alloc %</label>
                     <input
@@ -1735,7 +1729,7 @@
                 </form>
               )}
 
-              {/* CARD 1: Deliverables Table Grid Grouped Cleanly by Projects with Dual-Mode Hours/Day */}
+              {/* CARD 1: Deliverables Table Grid Grouped Cleanly by Projects with WRAP-AROUND TEXTAREA TITLE */}
               {activeTab === "gantt" && (
                 <div className="bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-sm">
                   <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-800 flex justify-between items-center bg-slate-50/50 dark:bg-slate-900/50">
@@ -1743,7 +1737,7 @@
                       Deliverables, WBS & Cross-Project Dependencies (Organized by Project Track)
                     </h3>
                     <div className="text-[11px] text-slate-500">
-                      {cpmSchedule.tasks.length} items total • Dual Hours & % Alloc Support • Click 📝 for Scope Details
+                      {cpmSchedule.tasks.length} items total • Word-Wrapped Titles • Click 📝 for Scope Details
                     </div>
                   </div>
 
@@ -1755,7 +1749,7 @@
                           <th className="w-10 px-2 py-3 text-center border-r border-slate-200 dark:border-slate-800">DONE</th>
                           <th className="w-16 px-2 py-3 border-r border-slate-200 dark:border-slate-800">WBS</th>
                           <th className="w-24 px-2 py-3 border-r border-slate-200 dark:border-slate-800">TYPE</th>
-                          <th className="min-w-[220px] px-3 py-3 border-r border-slate-200 dark:border-slate-800">DELIVERABLE (CLICK TO EDIT)</th>
+                          <th className="min-w-[240px] px-3 py-3 border-r border-slate-200 dark:border-slate-800">DELIVERABLE (WRAP-AROUND EDIT)</th>
                           <th className="w-14 px-1 py-3 text-center border-r border-slate-200 dark:border-slate-800">SCOPE</th>
                           <th className="min-w-[180px] px-3 py-3 border-r border-slate-200 dark:border-slate-800">PREDECESSORS</th>
                           <th className="min-w-[110px] px-2 py-3 border-r border-slate-200 dark:border-slate-800">START</th>
@@ -1851,16 +1845,16 @@
                                       </select>
                                     </td>
 
-                                    {/* INLINE EDITABLE DELIVERABLE TITLE */}
-                                    <td className="px-2 py-1.5 border-r border-slate-200 dark:border-slate-800 font-medium">
-                                      <div className="flex items-center gap-1.5 w-full">
-                                        {t.itemType === "Milestone" && <span className="text-brand-emerald shrink-0">◆</span>}
-                                        {isSummary && <span className="text-indigo-400 shrink-0 font-bold">📂</span>}
-                                        <input
-                                          type="text"
+                                    {/* WRAP-AROUND INLINE TEXTAREA FOR DELIVERABLE TITLE */}
+                                    <td className="px-3 py-2 border-r border-slate-200 dark:border-slate-800 font-medium">
+                                      <div className="flex items-start gap-1.5 w-full">
+                                        {t.itemType === "Milestone" && <span className="text-brand-emerald shrink-0 mt-0.5">◆</span>}
+                                        {isSummary && <span className="text-indigo-400 shrink-0 font-bold mt-0.5">📂</span>}
+                                        <textarea
+                                          rows={t.name && t.name.length > 40 ? 2 : 1}
                                           value={t.name}
                                           onChange={(e) => updateTaskField(t.id, "name", e.target.value)}
-                                          className="w-full bg-transparent border-b border-transparent hover:border-slate-400 dark:hover:border-slate-600 focus:border-brand-emerald outline-none text-slate-900 dark:text-white font-medium px-1 py-0.5 rounded"
+                                          className="w-full bg-transparent border-b border-transparent hover:border-slate-400 dark:hover:border-slate-600 focus:border-brand-emerald outline-none text-slate-900 dark:text-white font-medium p-0.5 resize-none whitespace-normal break-words leading-relaxed"
                                           placeholder="Deliverable title..."
                                         />
                                       </div>
@@ -1932,7 +1926,6 @@
                                       />
                                     </td>
 
-                                    {/* RESOURCES, HOURS & EFFORT */}
                                     <td className="px-2 py-1.5 border-r border-slate-200 dark:border-slate-800">
                                       <div className="flex flex-wrap items-center gap-1">
                                         {(t.assignments || []).map((asgn, aIdx) => {
@@ -1977,7 +1970,7 @@
                 </div>
               )}
 
-              {/* CARD 2: Dedicated Full-Width Gantt Chart with SVG Arrows */}
+              {/* CARD 2: Dedicated Full-Width Gantt Chart with CLEAN ORTHOGONAL CONNECTOR OBJECTS */}
               {activeTab === "gantt" && (
                 <div className="bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-sm">
                   <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-800 flex flex-wrap justify-between items-center gap-3 bg-slate-50/50 dark:bg-slate-900/50">
@@ -1986,7 +1979,7 @@
                         Interactive Gantt Timeline & Dependency Network
                       </h3>
                       <div className="text-[11px] text-slate-500">
-                        {selectedProjectId === "ALL" ? "Multi-Project Grouped Timeline" : "Project Critical Path Timeline"}
+                        Orthogonal Midpoint Connector Network • Solid Emerald (Standard) / Solid Rose (Critical Path)
                       </div>
                     </div>
 
@@ -2036,7 +2029,7 @@
                         ))}
                       </div>
 
-                      {/* SVG Canvas for Dependency Connector Arrows */}
+                      {/* SVG Canvas for CLEAN ORTHOGONAL (MANHATTAN) CONNECTOR LINES */}
                       <svg
                         className="absolute inset-0 pointer-events-none"
                         style={{
@@ -2045,48 +2038,76 @@
                         }}
                       >
                         <defs>
-                          <marker id="arrow-critical" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-                            <path d="M 0 1 L 10 5 L 0 9 z" fill="#f43f5e" />
+                          <marker id="arrow-critical" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+                            <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#f43f5e" />
                           </marker>
-                          <marker id="arrow-normal" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-                            <path d="M 0 1 L 10 5 L 0 9 z" fill="#10b981" />
+                          <marker id="arrow-normal" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+                            <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#10b981" />
                           </marker>
                         </defs>
                         {cpmSchedule.tasks.map((succ, sIdx) => {
                           const sY = sIdx * 40 + 56;
+                          const sLeft = 260 + succ.es * pxPerDay;
+                          const sWidth = Math.max(16, (succ.itemType === "Milestone" ? 0 : succ.duration) * pxPerDay - 4);
+                          const sRight = sLeft + sWidth;
+
+                          // Successor Connectors (Midpoints of edges)
+                          const sStartConn = { x: sLeft, y: sY };
+                          const sFinishConn = { x: succ.itemType === "Milestone" ? sLeft : sRight, y: sY };
+
                           return (succ.predecessors || []).map((pRef, pIdx) => {
                             const pIdxFound = cpmSchedule.tasks.findIndex(t => t.id === pRef.id);
                             if (pIdxFound < 0) return null;
                             const pred = cpmSchedule.tasks[pIdxFound];
                             const pY = pIdxFound * 40 + 56;
+                            const pLeft = 260 + pred.es * pxPerDay;
+                            const pWidth = Math.max(16, (pred.itemType === "Milestone" ? 0 : pred.duration) * pxPerDay - 4);
+                            const pRight = pLeft + pWidth;
+
+                            // Predecessor Connectors (Midpoints of edges)
+                            const pStartConn = { x: pLeft, y: pY };
+                            const pFinishConn = { x: pred.itemType === "Milestone" ? pLeft : pRight, y: pY };
+
                             const isCritLink = succ.isCritical && pred.isCritical;
                             const dep = pRef.type || "FS";
 
-                            let pX, sX;
-                            if (dep === "FS") {
-                              pX = 260 + (pred.itemType === "Milestone" ? pred.es * pxPerDay : pred.ef * pxPerDay);
-                              sX = 260 + succ.es * pxPerDay;
-                            } else if (dep === "SS") {
-                              pX = 260 + pred.es * pxPerDay;
-                              sX = 260 + succ.es * pxPerDay;
-                            } else if (dep === "FF") {
-                              pX = 260 + (pred.itemType === "Milestone" ? pred.es * pxPerDay : pred.ef * pxPerDay);
-                              sX = 260 + (succ.itemType === "Milestone" ? succ.es * pxPerDay : succ.ef * pxPerDay);
-                            } else {
-                              pX = 260 + pred.es * pxPerDay;
-                              sX = 260 + (succ.itemType === "Milestone" ? succ.es * pxPerDay : succ.ef * pxPerDay);
-                            }
-
                             let pathD = "";
-                            if (dep === "FF") {
-                              const loopX = Math.max(pX, sX) + 24;
-                              pathD = `M ${pX} ${pY} L ${loopX} ${pY} L ${loopX} ${sY} L ${sX + 4} ${sY}`;
+                            const offset = 12 + (pIdx * 4); // avoid overlapping parallel lines
+
+                            if (dep === "FS") {
+                              // Finish-to-Start: Exit right edge of Pred -> Enter left edge of Succ
+                              const exitX = pFinishConn.x;
+                              const enterX = sStartConn.x;
+
+                              if (enterX >= exitX + offset) {
+                                // Standard forward routing with single midpoint vertical segment
+                                const midX = Math.round((exitX + enterX) / 2);
+                                pathD = `M ${exitX} ${pY} H ${midX} V ${sY} H ${enterX - 2}`;
+                              } else {
+                                // Backward loop routing when successor starts before predecessor finishes
+                                const loopRight = exitX + offset;
+                                const loopLeft = enterX - offset;
+                                const midY = Math.round((pY + sY) / 2);
+                                pathD = `M ${exitX} ${pY} H ${loopRight} V ${midY} H ${loopLeft} V ${sY} H ${enterX - 2}`;
+                              }
+                            } else if (dep === "FF") {
+                              // Finish-to-Finish: Exit right edge of Pred -> Enter right edge of Succ
+                              const exitX = pFinishConn.x;
+                              const enterX = sFinishConn.x;
+                              const maxRight = Math.max(exitX, enterX) + 16 + offset;
+                              pathD = `M ${exitX} ${pY} H ${maxRight} V ${sY} H ${enterX + 2}`;
                             } else if (dep === "SS") {
-                              const loopX = Math.min(pX, sX) - 20;
-                              pathD = `M ${pX} ${pY} L ${loopX} ${pY} L ${loopX} ${sY} L ${sX - 4} ${sY}`;
+                              // Start-to-Start: Exit left edge of Pred -> Enter left edge of Succ
+                              const exitX = pStartConn.x;
+                              const enterX = sStartConn.x;
+                              const minLeft = Math.min(exitX, enterX) - 16 - offset;
+                              pathD = `M ${exitX} ${pY} H ${minLeft} V ${sY} H ${enterX - 2}`;
                             } else {
-                              const midX = (pX + sX) / 2;
-                              pathD = `M ${pX} ${pY} C ${midX} ${pY}, ${midX} ${sY}, ${sX - 4} ${sY}`;
+                              // Start-to-Finish (SF): Exit left edge of Pred -> Enter right edge of Succ
+                              const exitX = pStartConn.x;
+                              const enterX = sFinishConn.x;
+                              const minLeft = Math.min(exitX, enterX - offset);
+                              pathD = `M ${exitX} ${pY} H ${minLeft} V ${sY} H ${enterX + 2}`;
                             }
 
                             return (
@@ -2096,16 +2117,17 @@
                                 fill="none"
                                 stroke={isCritLink ? "#f43f5e" : "#10b981"}
                                 strokeWidth={isCritLink ? "2" : "1.5"}
-                                strokeDasharray={dep === "FS" ? "" : "3,3"}
+                                strokeLinejoin="miter"
+                                strokeMiterlimit="10"
                                 markerEnd={isCritLink ? "url(#arrow-critical)" : "url(#arrow-normal)"}
-                                opacity="0.85"
+                                opacity="0.9"
                               />
                             );
                           });
                         })}
                       </svg>
 
-                      {/* Deliverable Gantt Rows */}
+                      {/* Deliverable Gantt Rows with Connector Endpoint Nodes */}
                       <div className="space-y-2">
                         {cpmSchedule.tasks.map((t) => {
                           const leftPos = 260 + t.es * pxPerDay;
@@ -2416,7 +2438,7 @@
                 </div>
               )}
 
-              {/* RESOURCE LOADING HEATMAP WITH DUAL-METRIC TOGGLE (HOURS vs ALLOCATION %) */}
+              {/* RESOURCE LOADING HEATMAP */}
               {activeTab === "loading" && (
                 <div className="space-y-4">
                   <div className="bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-sm">
@@ -2431,7 +2453,6 @@
                       </div>
 
                       <div className="flex items-center gap-3">
-                        {/* Metric Unit Toggle: Hours vs Percentage */}
                         <div className="flex p-0.5 bg-slate-200 dark:bg-slate-800 rounded-lg text-[10px] font-semibold">
                           <button
                             onClick={() => setHeatmapMetric("hours")}
@@ -2865,7 +2886,7 @@
             </div>
           )}
 
-          {/* DUAL-INPUT RESOURCE ASSIGNMENT MODAL (Synchronized Hours/Day ⇄ Allocation %) */}
+          {/* DUAL-INPUT RESOURCE ASSIGNMENT MODAL */}
           {assignModalTask && (
             <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
               <div className="bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-800 rounded-3xl p-6 w-full max-w-lg space-y-4 shadow-2xl">
@@ -2908,7 +2929,6 @@
                           </select>
                         </div>
 
-                        {/* Synchronized Hours/Day Input */}
                         <div className="w-24">
                           <label className="block text-[8px] uppercase tracking-wider text-slate-400 font-bold">Hours/Day</label>
                           <input
@@ -2928,7 +2948,6 @@
                           />
                         </div>
 
-                        {/* Synchronized Allocation % Input */}
                         <div className="w-20">
                           <label className="block text-[8px] uppercase tracking-wider text-slate-400 font-bold">Alloc %</label>
                           <input
@@ -3298,7 +3317,6 @@
                           />
                         </div>
 
-                        {/* Configurable Work Hours & Work Days Schedule */}
                         <div className="grid grid-cols-2 gap-3 p-3 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800">
                           <div>
                             <label className="block text-[10px] font-bold uppercase text-brand-emerald mb-1">Daily Work Hours</label>
