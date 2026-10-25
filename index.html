@@ -98,7 +98,7 @@
     const TODAY_ISO = new Date().toISOString().slice(0, 10);
     const THEME_KEY = "apexpms_theme";
 
-    // Canadian & US Statutory Holidays (2026) - Including 2-day US Thanksgiving
+    // Canadian & US Statutory Holidays (2026) - 2-Day US Thanksgiving Included
     const CA_STAT_HOLIDAYS_2026 = [
       { date: "2026-01-01", name: "New Year's Day (CA/US)" },
       { date: "2026-02-16", name: "Family Day (AB)" },
@@ -293,6 +293,7 @@
       const [multiDepModalTask, setMultiDepModalTask] = useState(null);
       const [assignModalTask, setAssignModalTask] = useState(null);
       const [descModalTask, setDescModalTask] = useState(null);
+      const [editingOpWorkers, setEditingOpWorkers] = useState(null); // Modal for editing workers on a specific recurring operation
 
       // Management Form State
       const [manageAction, setManageAction] = useState("edit");
@@ -413,7 +414,7 @@
       });
 
       // Procurement Quick-Add State
-      const newPOState = {
+      const [newPO, setNewPO] = useState({
         poNumber: `PO-${new Date().getFullYear()}-${String(Math.floor(Math.random() * 900) + 100)}`,
         vendor: "",
         category: "Software License",
@@ -423,8 +424,7 @@
         status: "Draft",
         terms: "Net 30",
         deliveryDate: addDaysISO(TODAY_ISO, 14)
-      };
-      const [newPO, setNewPO] = useState(newPOState);
+      });
 
       useEffect(() => {
         if (!dbClient) {
@@ -466,7 +466,10 @@
                 dailyHours: Number(r.dailyHours || (r.name === "Mustafa Nisar" ? 10 : 8)),
                 daysPerWeek: Number(r.daysPerWeek || (r.name === "Mustafa Nisar" ? 7 : 5))
               })),
-              operations: row.state.operations || INITIAL_EMPTY_WORKSPACE.operations,
+              operations: (row.state.operations || INITIAL_EMPTY_WORKSPACE.operations).map(op => ({
+                ...op,
+                assignments: op.assignments || [{ name: "Mustafa Nisar", allocation: 25, dailyHours: 2.5 }]
+              })),
               risks: row.state.risks || [],
               procurements: row.state.procurements || [],
               tasks: (row.state.tasks || []).map(t => {
@@ -1110,7 +1113,7 @@
         }));
       };
 
-      // Operations Handlers
+      // Operations CRUD Handlers
       const handleAddOperation = (e) => {
         e.preventDefault();
         if (!newOpName.trim()) return;
@@ -1133,6 +1136,26 @@
         };
         setData(prev => ({ ...prev, operations: [...(prev.operations || []), newOp] }));
         setNewOpName("");
+      };
+
+      const updateOperationField = (opId, field, value) => {
+        setData(prev => ({
+          ...prev,
+          operations: (prev.operations || []).map(o => {
+            if (o.id !== opId) return o;
+            return { ...o, [field]: value };
+          })
+        }));
+      };
+
+      const updateOperationAssignments = (opId, newAssignments) => {
+        setData(prev => ({
+          ...prev,
+          operations: (prev.operations || []).map(o => {
+            if (o.id !== opId) return o;
+            return { ...o, assignments: newAssignments };
+          })
+        }));
       };
 
       const toggleOperationActive = (opId) => {
@@ -1604,7 +1627,7 @@
 
             {/* Main Workspace Area */}
             <main className="flex-1 p-4 md:p-6 overflow-y-auto space-y-5 bg-slate-50/50 dark:bg-[#0b1120]">
-              {/* Deliverables Quick-Add Bar */}
+              {/* Deliverables Quick-Add Bar with Linked Hours & Allocation */}
               {activeTab === "gantt" && (
                 <form
                   onSubmit={handleAddItem}
@@ -1979,7 +2002,7 @@
                         Interactive Gantt Timeline & Dependency Network
                       </h3>
                       <div className="text-[11px] text-slate-500">
-                        Orthogonal Midpoint Connector Network • Solid Emerald (Standard) / Solid Rose (Critical Path)
+                        Midpoint Edge Connectors • Solid (FS), Dashed (FF), Dash-Dot (SS), Dotted (SF)
                       </div>
                     </div>
 
@@ -2012,8 +2035,8 @@
 
                   <div className="overflow-x-auto relative p-4">
                     <div style={{ width: `${Math.max(900, cpmSchedule.totalSpanDays * pxPerDay + 260)}px` }} className="relative select-none">
-                      {/* Timeline Header */}
-                      <div className="flex border-b border-slate-200 dark:border-slate-800 pb-2 mb-2 pl-[260px]">
+                      {/* Timeline Header (Height: 46px) */}
+                      <div className="flex border-b border-slate-200 dark:border-slate-800 pb-2 mb-2 pl-[260px] h-[46px]">
                         {timelineUnits.map((u) => (
                           <div
                             key={u.key}
@@ -2034,24 +2057,25 @@
                         className="absolute inset-0 pointer-events-none"
                         style={{
                           width: `${cpmSchedule.totalSpanDays * pxPerDay + 260}px`,
-                          height: `${cpmSchedule.tasks.length * 40 + 50}px`
+                          height: `${cpmSchedule.tasks.length * 44 + 60}px`
                         }}
                       >
                         <defs>
-                          <marker id="arrow-critical" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+                          <marker id="arrow-critical" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
                             <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#f43f5e" />
                           </marker>
-                          <marker id="arrow-normal" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+                          <marker id="arrow-normal" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
                             <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#10b981" />
                           </marker>
                         </defs>
                         {cpmSchedule.tasks.map((succ, sIdx) => {
-                          const sY = sIdx * 40 + 56;
+                          // Mathematically locked to the exact vertical midpoint of row sIdx
+                          const sY = 54 + (sIdx * 44) + 16;
                           const sLeft = 260 + succ.es * pxPerDay;
                           const sWidth = Math.max(16, (succ.itemType === "Milestone" ? 0 : succ.duration) * pxPerDay - 4);
                           const sRight = sLeft + sWidth;
 
-                          // Successor Connectors (Midpoints of edges)
+                          // Successor Connectors (Exact Midpoints of edges)
                           const sStartConn = { x: sLeft, y: sY };
                           const sFinishConn = { x: succ.itemType === "Milestone" ? sLeft : sRight, y: sY };
 
@@ -2059,56 +2083,77 @@
                             const pIdxFound = cpmSchedule.tasks.findIndex(t => t.id === pRef.id);
                             if (pIdxFound < 0) return null;
                             const pred = cpmSchedule.tasks[pIdxFound];
-                            const pY = pIdxFound * 40 + 56;
+                            // Mathematically locked to the exact vertical midpoint of row pIdxFound
+                            const pY = 54 + (pIdxFound * 44) + 16;
                             const pLeft = 260 + pred.es * pxPerDay;
                             const pWidth = Math.max(16, (pred.itemType === "Milestone" ? 0 : pred.duration) * pxPerDay - 4);
                             const pRight = pLeft + pWidth;
 
-                            // Predecessor Connectors (Midpoints of edges)
+                            // Predecessor Connectors (Exact Midpoints of edges)
                             const pStartConn = { x: pLeft, y: pY };
                             const pFinishConn = { x: pred.itemType === "Milestone" ? pLeft : pRight, y: pY };
 
                             const isCritLink = succ.isCritical && pred.isCritical;
                             const dep = pRef.type || "FS";
 
+                            // Find rightmost bound of all intermediate tasks between pIdxFound and sIdx to avoid passing through them
+                            const minIdx = Math.min(pIdxFound, sIdx);
+                            const maxIdx = Math.max(pIdxFound, sIdx);
+                            let maxIntermediateRight = Math.max(pRight, sRight);
+                            for (let k = minIdx; k <= maxIdx; k++) {
+                              const intermediateTask = cpmSchedule.tasks[k];
+                              if (intermediateTask) {
+                                const iLeft = 260 + intermediateTask.es * pxPerDay;
+                                const iWidth = Math.max(16, (intermediateTask.itemType === "Milestone" ? 0 : intermediateTask.duration) * pxPerDay - 4);
+                                if (iLeft + iWidth > maxIntermediateRight) {
+                                  maxIntermediateRight = iLeft + iWidth;
+                                }
+                              }
+                            }
+
                             let pathD = "";
-                            const offset = 12 + (pIdx * 4); // avoid overlapping parallel lines
+                            const trunkOffset = 14;
 
                             if (dep === "FS") {
-                              // Finish-to-Start: Exit right edge of Pred -> Enter left edge of Succ
                               const exitX = pFinishConn.x;
                               const enterX = sStartConn.x;
 
-                              if (enterX >= exitX + offset) {
-                                // Standard forward routing with single midpoint vertical segment
+                              if (enterX >= exitX + 24) {
+                                // Clear forward routing: Drop in midpoint corridor between predecessor finish and successor start
                                 const midX = Math.round((exitX + enterX) / 2);
                                 pathD = `M ${exitX} ${pY} H ${midX} V ${sY} H ${enterX - 2}`;
                               } else {
-                                // Backward loop routing when successor starts before predecessor finishes
-                                const loopRight = exitX + offset;
-                                const loopLeft = enterX - offset;
-                                const midY = Math.round((pY + sY) / 2);
-                                pathD = `M ${exitX} ${pY} H ${loopRight} V ${midY} H ${loopLeft} V ${sY} H ${enterX - 2}`;
+                                // Backward loop around intermediate tasks so it never cuts through them
+                                const loopRight = maxIntermediateRight + 16;
+                                const loopLeft = Math.min(exitX, enterX) - 16;
+                                pathD = `M ${exitX} ${pY} H ${loopRight} V ${sY - 14} H ${loopLeft} V ${sY} H ${enterX - 2}`;
                               }
                             } else if (dep === "FF") {
-                              // Finish-to-Finish: Exit right edge of Pred -> Enter right edge of Succ
+                              // Finish-to-Finish: Routes along the clean right margin, avoiding intermediate objects
                               const exitX = pFinishConn.x;
                               const enterX = sFinishConn.x;
-                              const maxRight = Math.max(exitX, enterX) + 16 + offset;
-                              pathD = `M ${exitX} ${pY} H ${maxRight} V ${sY} H ${enterX + 2}`;
+                              const clearRight = maxIntermediateRight + trunkOffset;
+                              // Aligned combined entry into the right connector
+                              pathD = `M ${exitX} ${pY} H ${clearRight} V ${sY} H ${enterX + 2}`;
                             } else if (dep === "SS") {
-                              // Start-to-Start: Exit left edge of Pred -> Enter left edge of Succ
+                              // Start-to-Start: Routes along the clean left margin
                               const exitX = pStartConn.x;
                               const enterX = sStartConn.x;
-                              const minLeft = Math.min(exitX, enterX) - 16 - offset;
-                              pathD = `M ${exitX} ${pY} H ${minLeft} V ${sY} H ${enterX - 2}`;
+                              const clearLeft = Math.min(exitX, enterX) - 16;
+                              pathD = `M ${exitX} ${pY} H ${clearLeft} V ${sY} H ${enterX - 2}`;
                             } else {
-                              // Start-to-Finish (SF): Exit left edge of Pred -> Enter right edge of Succ
+                              // Start-to-Finish (SF)
                               const exitX = pStartConn.x;
                               const enterX = sFinishConn.x;
-                              const minLeft = Math.min(exitX, enterX - offset);
-                              pathD = `M ${exitX} ${pY} H ${minLeft} V ${sY} H ${enterX + 2}`;
+                              const clearRight = maxIntermediateRight + trunkOffset;
+                              pathD = `M ${exitX} ${pY} H ${clearRight} V ${sY} H ${enterX + 2}`;
                             }
+
+                            // Distinct dash patterns based on dependency type
+                            let dashPattern = "";
+                            if (dep === "FF") dashPattern = "6,4";          // Dashed for Finish-to-Finish
+                            else if (dep === "SS") dashPattern = "8,3,2,3";  // Dash-Dot for Start-to-Start
+                            else if (dep === "SF") dashPattern = "2,3";      // Dotted for Start-to-Finish
 
                             return (
                               <path
@@ -2117,6 +2162,7 @@
                                 fill="none"
                                 stroke={isCritLink ? "#f43f5e" : "#10b981"}
                                 strokeWidth={isCritLink ? "2" : "1.5"}
+                                strokeDasharray={dashPattern}
                                 strokeLinejoin="miter"
                                 strokeMiterlimit="10"
                                 markerEnd={isCritLink ? "url(#arrow-critical)" : "url(#arrow-normal)"}
@@ -2127,7 +2173,7 @@
                         })}
                       </svg>
 
-                      {/* Deliverable Gantt Rows with Connector Endpoint Nodes */}
+                      {/* Deliverable Gantt Rows with Explicit Endpoint Connector Anchor Dots */}
                       <div className="space-y-2">
                         {cpmSchedule.tasks.map((t) => {
                           const leftPos = 260 + t.es * pxPerDay;
@@ -2137,7 +2183,7 @@
                           const taskPrj = data.projects.find(p => p.id === t.projectId);
 
                           return (
-                            <div key={t.id} className="flex items-center h-8 relative hover:bg-slate-50 dark:hover:bg-slate-800/30 rounded">
+                            <div key={t.id} className="flex items-center h-[36px] relative hover:bg-slate-50 dark:hover:bg-slate-800/30 rounded">
                               <div className="w-[260px] shrink-0 pr-3 truncate text-xs font-medium text-slate-700 dark:text-slate-300 flex items-center justify-between">
                                 <span className="truncate">
                                   <span className="font-mono text-[9px] px-1 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 mr-1.5 font-bold">
@@ -2170,7 +2216,7 @@
                               ) : (
                                 <div
                                   style={{ left: `${leftPos}px`, width: `${widthPx}px` }}
-                                  className={`absolute h-6 rounded-md px-2 flex items-center justify-between text-[10px] font-semibold shadow-sm transition z-10 ${
+                                  className={`absolute h-7 rounded-md px-2 flex items-center justify-between text-[10px] font-semibold shadow-sm transition z-10 ${
                                     t.done
                                       ? "bg-slate-500 text-white"
                                       : t.isCritical
@@ -2178,8 +2224,14 @@
                                         : "bg-brand-emerald text-brand-navy font-bold"
                                   }`}
                                 >
+                                  {/* Left Start Anchor Port (S) */}
+                                  <div className="absolute -left-1 top-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-white dark:bg-slate-900 border border-brand-emerald shadow-xs" title="Start Anchor (S)" />
+
                                   <span className="truncate">{t.name}</span>
                                   <span className="text-[9px] opacity-80 ml-1">{t.allocation}%</span>
+
+                                  {/* Right Finish Anchor Port (F) */}
+                                  <div className="absolute -right-1 top-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-white dark:bg-slate-900 border border-brand-emerald shadow-xs" title="Finish Anchor (F)" />
                                 </div>
                               )}
                             </div>
@@ -2191,7 +2243,7 @@
                 </div>
               )}
 
-              {/* OPERATIONS & RECURRING CADENCE DASHBOARD */}
+              {/* OPERATIONS & RECURRING CADENCE DASHBOARD WITH FULLY INLINE-EDITABLE FIELDS */}
               {activeTab === "operations" && (
                 <div className="space-y-5">
                   <form
@@ -2289,15 +2341,15 @@
                     </button>
                   </form>
 
-                  {/* Operations Grid Table */}
+                  {/* Operations Grid Table with Fully Editable Inline Inputs */}
                   <div className="bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-sm">
                     <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-800 flex justify-between items-center bg-slate-50/50 dark:bg-slate-900/50">
                       <div>
                         <h3 className="font-bold text-xs uppercase tracking-wider text-slate-700 dark:text-slate-300">
-                          Active Operational Cadences (PMI Runtime Scope)
+                          Active Operational Cadences (Runtime Cadence)
                         </h3>
                         <p className="text-[11px] text-slate-500">
-                          Ongoing routines quantified in hours & % and overlaid onto enterprise resource capacity.
+                          Click any field below to edit operation names, change schedules, or adjust assigned worker hours.
                         </p>
                       </div>
                       <span className="text-[10px] px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-500 font-semibold border border-emerald-500/20">
@@ -2309,9 +2361,9 @@
                       <thead>
                         <tr className="border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 text-[10px] font-bold uppercase tracking-wider text-slate-500">
                           <th className="px-4 py-3">STATUS</th>
-                          <th className="px-4 py-3">RECURRING OPERATION</th>
-                          <th className="px-4 py-3">CADENCE SCHEDULE</th>
-                          <th className="px-4 py-3">ASSIGNED WORKERS & HOURS</th>
+                          <th className="px-4 py-3 min-w-[220px]">RECURRING OPERATION (CLICK TO EDIT)</th>
+                          <th className="px-4 py-3 min-w-[160px]">CADENCE SCHEDULE</th>
+                          <th className="px-4 py-3 min-w-[240px]">ASSIGNED WORKERS & HOURS</th>
                           <th className="px-3 py-3 text-center">TOGGLE</th>
                           <th className="px-3 py-3 text-center">DEL</th>
                         </tr>
@@ -2331,13 +2383,33 @@
                                   {op.active ? '● Running' : '○ Paused'}
                                 </span>
                               </td>
-                              <td className="px-4 py-3 font-semibold text-slate-900 dark:text-white">
-                                {op.name}
+
+                              {/* Editable Operation Name */}
+                              <td className="px-4 py-2 font-semibold">
+                                <input
+                                  type="text"
+                                  value={op.name}
+                                  onChange={(e) => updateOperationField(op.id, "name", e.target.value)}
+                                  className="w-full bg-transparent border-b border-transparent hover:border-slate-400 dark:hover:border-slate-600 focus:border-brand-emerald outline-none text-slate-900 dark:text-white font-semibold py-1 px-1 rounded"
+                                />
                               </td>
-                              <td className="px-4 py-3 font-mono text-[11px] text-brand-emerald">
-                                {op.cadence === 'daily_weekdays' ? 'Daily (Mon - Fri)' : op.cadence === 'twice_daily' ? '2x Daily (AM & PM)' : op.cadence === 'weekly_mon' ? 'Weekly (Mondays)' : 'Daily (7 Days/Wk)'}
+
+                              {/* Editable Cadence Dropdown */}
+                              <td className="px-4 py-2">
+                                <select
+                                  value={op.cadence}
+                                  onChange={(e) => updateOperationField(op.id, "cadence", e.target.value)}
+                                  className="bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-2 py-1 text-xs text-brand-emerald font-semibold"
+                                >
+                                  <option value="daily_weekdays">Daily (Mon - Fri)</option>
+                                  <option value="daily_7days">Daily (7 Days/Wk)</option>
+                                  <option value="twice_daily">2x Daily (AM & PM)</option>
+                                  <option value="weekly_mon">Weekly (Mondays)</option>
+                                </select>
                               </td>
-                              <td className="px-4 py-3">
+
+                              {/* Editable Assigned Workers & Hours */}
+                              <td className="px-4 py-2">
                                 <div className="flex flex-wrap items-center gap-1.5">
                                   {(op.assignments || []).map((asgn, aIdx) => {
                                     const isAg = data.resources?.find(r => r.name === asgn.name)?.isAgent;
@@ -2347,8 +2419,15 @@
                                       </span>
                                     );
                                   })}
+                                  <button
+                                    onClick={() => setEditingOpWorkers(op)}
+                                    className="px-2 py-0.5 rounded border border-dashed border-slate-300 dark:border-slate-700 text-slate-500 hover:text-brand-emerald text-[10px] font-semibold"
+                                  >
+                                    ⚙️ Edit Workers
+                                  </button>
                                 </div>
                               </td>
+
                               <td className="px-3 py-3 text-center">
                                 <button
                                   onClick={() => toggleOperationActive(op.id)}
@@ -2836,6 +2915,143 @@
             </main>
           </div>
 
+          {/* EDIT WORKERS FOR RECURRING OPERATION MODAL */}
+          {editingOpWorkers && (
+            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+              <div className="bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-800 rounded-3xl p-6 w-full max-w-lg space-y-4 shadow-2xl">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="font-bold text-base text-slate-900 dark:text-white">
+                      Edit Assigned Workers for Cadence
+                    </h3>
+                    <p className="text-xs text-slate-500 truncate">{editingOpWorkers.name}</p>
+                  </div>
+                  <button type="button" onClick={() => setEditingOpWorkers(null)} className="text-slate-400 hover:text-white">✕</button>
+                </div>
+
+                <div className="space-y-2.5 max-h-64 overflow-y-auto pr-1">
+                  {(editingOpWorkers.assignments || []).map((asgn, idx) => {
+                    const cap = getResourceCapacity(asgn.name);
+                    const currentH = asgn.dailyHours !== undefined
+                      ? Number(asgn.dailyHours)
+                      : Math.round((cap.dailyHours * (Number(asgn.allocation || 25) / 100)) * 10) / 10;
+
+                    return (
+                      <div key={idx} className="flex items-center gap-2 p-2.5 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+                        <div className="flex-1 min-w-[130px]">
+                          <select
+                            value={asgn.name}
+                            onChange={(e) => {
+                              const newName = e.target.value;
+                              const newCap = getResourceCapacity(newName);
+                              const updated = [...editingOpWorkers.assignments];
+                              const alloc = Number(updated[idx].allocation || 25);
+                              updated[idx].name = newName;
+                              updated[idx].dailyHours = Math.round((newCap.dailyHours * (alloc / 100)) * 10) / 10;
+                              setEditingOpWorkers({ ...editingOpWorkers, assignments: updated });
+                            }}
+                            className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-2 py-1 text-xs text-slate-900 dark:text-white"
+                          >
+                            {(data.resources || []).map(r => (
+                              <option key={r.id} value={r.name}>{r.isAgent ? "🤖 " : ""}{r.name} (Base: {r.dailyHours || 8}h/d)</option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div className="w-24">
+                          <label className="block text-[8px] uppercase tracking-wider text-slate-400 font-bold">Hours/Day</label>
+                          <input
+                            type="number"
+                            step="0.5"
+                            min="0"
+                            value={currentH}
+                            onChange={(e) => {
+                              const h = parseFloat(e.target.value) || 0;
+                              const updated = [...editingOpWorkers.assignments];
+                              updated[idx].dailyHours = h;
+                              updated[idx].allocation = Math.round((h / cap.dailyHours) * 100);
+                              setEditingOpWorkers({ ...editingOpWorkers, assignments: updated });
+                            }}
+                            className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded px-1.5 py-0.5 text-xs font-mono text-center text-slate-900 dark:text-white"
+                          />
+                        </div>
+
+                        <div className="w-20">
+                          <label className="block text-[8px] uppercase tracking-wider text-slate-400 font-bold">Alloc %</label>
+                          <input
+                            type="number"
+                            min="5"
+                            max="100"
+                            step="5"
+                            value={asgn.allocation}
+                            onChange={(e) => {
+                              const a = parseFloat(e.target.value) || 0;
+                              const updated = [...editingOpWorkers.assignments];
+                              updated[idx].allocation = a;
+                              updated[idx].dailyHours = Math.round((cap.dailyHours * (a / 100)) * 10) / 10;
+                              setEditingOpWorkers({ ...editingOpWorkers, assignments: updated });
+                            }}
+                            className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded px-1.5 py-0.5 text-xs font-mono text-center text-slate-900 dark:text-white"
+                          />
+                        </div>
+
+                        <button
+                          onClick={() => {
+                            const updated = editingOpWorkers.assignments.filter((_, i) => i !== idx);
+                            setEditingOpWorkers({ ...editingOpWorkers, assignments: updated });
+                          }}
+                          className="text-slate-400 hover:text-rose-500 font-bold px-1 mt-3"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const existing = editingOpWorkers.assignments || [];
+                    const available = (data.resources || []).find(r => !existing.some(e => e.name === r.name)) || data.resources[0];
+                    const cap = getResourceCapacity(available ? available.name : "Lead");
+                    setEditingOpWorkers({
+                      ...editingOpWorkers,
+                      assignments: [...existing, {
+                        name: available ? available.name : "Team Member",
+                        allocation: 25,
+                        dailyHours: Math.round(cap.dailyHours * 0.25 * 10) / 10
+                      }]
+                    });
+                  }}
+                  className="w-full py-1.5 rounded-xl border border-dashed border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:text-brand-emerald text-xs font-semibold"
+                >
+                  + Add Another Worker / AI Agent
+                </button>
+
+                <div className="flex gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      updateOperationAssignments(editingOpWorkers.id, editingOpWorkers.assignments);
+                      setEditingOpWorkers(null);
+                    }}
+                    className="flex-1 py-2 rounded-xl bg-brand-emerald hover:bg-brand-emeraldHover text-brand-navy font-bold text-xs"
+                  >
+                    Save Operational Workers
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditingOpWorkers(null)}
+                    className="px-4 py-2 rounded-xl bg-slate-200 dark:bg-slate-800 text-xs font-semibold"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Task Scope & Description Modal */}
           {descModalTask && (
             <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
@@ -3100,7 +3316,7 @@
             </div>
           )}
 
-          {/* Manage Modal with Configurable Resource Daily Hours & Schedule */}
+          {/* Manage Modal */}
           {showManageModal && (
             <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
               <div className="bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-800 rounded-3xl p-6 w-full max-w-xl space-y-4 shadow-2xl">
@@ -3354,7 +3570,7 @@
                             className="accent-brand-emerald"
                           />
                           <label htmlFor="isAgentCheck" className="text-xs text-slate-300 font-medium">
-                            Register as an <strong>Autonomous AI Agent</strong> (Tracks hourly active duty window)
+                            Register as an <strong>Autonomous AI Agent</strong>
                           </label>
                         </div>
                       </div>
