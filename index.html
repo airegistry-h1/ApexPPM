@@ -98,7 +98,7 @@
     const TODAY_ISO = new Date().toISOString().slice(0, 10);
     const THEME_KEY = "apexpms_theme";
 
-    // Canadian (Alberta) & US Statutory Holidays (2026) - Including 2-day US Thanksgiving
+    // Canadian & US Statutory Holidays (2026) - Including 2-day US Thanksgiving
     const CA_STAT_HOLIDAYS_2026 = [
       { date: "2026-01-01", name: "New Year's Day (CA/US)" },
       { date: "2026-02-16", name: "Family Day (AB)" },
@@ -165,8 +165,52 @@
         { id: "prj-1", programId: "pgm-1", code: "PRJ-01", name: "Core Project", methodology: "Hybrid Agile", baselineStart: TODAY_ISO }
       ],
       teamMembers: [],
-      resources: [],
+      resources: [
+        { id: "res-1", name: "Mustafa Nisar", role: "Program Director / Lead", dailyHours: 10, daysPerWeek: 7, isAgent: false },
+        { id: "res-2", name: "Gemini", role: "Autonomous AI Agent", dailyHours: 8, daysPerWeek: 7, isAgent: true },
+        { id: "res-3", name: "Lovable", role: "Fullstack App Builder Agent", dailyHours: 6, daysPerWeek: 7, isAgent: true }
+      ],
       tasks: [],
+      operations: [
+        {
+          id: "ops-1",
+          name: "Daily AI Tech Chronicle Newsletter Digest",
+          cadence: "daily_weekdays",
+          active: true,
+          assignments: [
+            { name: "Mustafa Nisar", allocation: 25, dailyHours: 2.5 },
+            { name: "Gemini", allocation: 50, dailyHours: 4.0 }
+          ]
+        },
+        {
+          id: "ops-2",
+          name: "Compliance & Dossier Audit Sweeps (2x Daily)",
+          cadence: "twice_daily",
+          active: true,
+          assignments: [
+            { name: "Gemini", allocation: 50, dailyHours: 4.0 }
+          ]
+        },
+        {
+          id: "ops-3",
+          name: "Weekly Frontier Labs Audit (Mondays)",
+          cadence: "weekly_mon",
+          active: true,
+          assignments: [
+            { name: "Gemini", allocation: 30, dailyHours: 2.4 }
+          ]
+        },
+        {
+          id: "ops-4",
+          name: "Daily Tracker Catalog DB Synchronization",
+          cadence: "daily_7days",
+          active: true,
+          assignments: [
+            { name: "Mustafa Nisar", allocation: 15, dailyHours: 1.5 },
+            { name: "Lovable", allocation: 25, dailyHours: 1.5 }
+          ]
+        }
+      ],
       risks: [],
       procurements: []
     };
@@ -223,9 +267,12 @@
       const [selectedProjectId, setSelectedProjectId] = useState("ALL");
       const [activeTab, setActiveTab] = useState("gantt");
 
+      // Heatmap View Mode: "hours" or "percentage"
+      const [heatmapMetric, setHeatmapMetric] = useState("hours"); // "hours" | "percentage"
+
       // Gantt Zoom & Timeline Scale & Holiday Region Selector
       const [ganttScale, setGanttScale] = useState("day");
-      const [holidayRegion, setHolidayRegion] = useState("BOTH"); // Default to cross-border (CA + US)
+      const [holidayRegion, setHolidayRegion] = useState("BOTH");
 
       const activeStatHolidays = useMemo(() => {
         if (holidayRegion === "CA_AB") return CA_STAT_HOLIDAYS_2026;
@@ -260,9 +307,11 @@
       const [editMethodology, setEditMethodology] = useState("Hybrid Agile");
       const [editParentPgmId, setEditParentPgmId] = useState("");
 
-      // Resource / Team Form State
+      // Resource / Team Form State with Daily Hours and Weekly Schedule
       const [newResourceName, setNewResourceName] = useState("");
       const [newResourceRole, setNewResourceRole] = useState("Team Member");
+      const [newResourceHours, setNewResourceHours] = useState(10);
+      const [newResourceDaysWeek, setNewResourceDaysWeek] = useState(7);
       const [newResourceIsAgent, setNewResourceIsAgent] = useState(false);
       const [newMemberEmail, setNewMemberEmail] = useState("");
       const [newMemberRole, setNewMemberRole] = useState("Editor");
@@ -274,13 +323,39 @@
       const [qaStartDate, setQaStartDate] = useState(TODAY_ISO);
       const [qaDuration, setQaDuration] = useState("1");
       const [qaResource, setQaResource] = useState("");
+      const [qaHoursPerDay, setQaHoursPerDay] = useState(10);
       const [qaAllocation, setQaAllocation] = useState(100);
+
+      // Operations Quick-Add State
+      const [newOpName, setNewOpName] = useState("");
+      const [newOpCadence, setNewOpCadence] = useState("daily_weekdays");
+      const [newOpResource, setNewOpResource] = useState("");
+      const [newOpHours, setNewOpHours] = useState(2.5);
+      const [newOpAlloc, setNewOpAlloc] = useState(25);
 
       useEffect(() => {
         if (!qaResource && data.resources && data.resources.length > 0) {
           setQaResource(data.resources[0].name);
         }
+        if (!newOpResource && data.resources && data.resources.length > 0) {
+          setNewOpResource(data.resources[0].name);
+        }
       }, [data.resources]);
+
+      // Helper to lookup resource capacity
+      const getResourceCapacity = (resourceName) => {
+        const found = (data.resources || []).find(r => r.name === resourceName);
+        if (found) {
+          return {
+            dailyHours: Number(found.dailyHours || (resourceName === "Mustafa Nisar" ? 10 : 8)),
+            daysPerWeek: Number(found.daysPerWeek || (resourceName === "Mustafa Nisar" ? 7 : 5))
+          };
+        }
+        return {
+          dailyHours: resourceName === "Mustafa Nisar" ? 10 : 8,
+          daysPerWeek: resourceName === "Mustafa Nisar" ? 7 : 5
+        };
+      };
 
       // Populators for Edit Active
       const loadProjectForEdit = (prjId) => {
@@ -310,6 +385,8 @@
           setSelectedEditResourceId(res.id);
           setNewResourceName(res.name);
           setNewResourceRole(res.role || "Team Member");
+          setNewResourceHours(Number(res.dailyHours || (res.name === "Mustafa Nisar" ? 10 : 8)));
+          setNewResourceDaysWeek(Number(res.daysPerWeek || (res.name === "Mustafa Nisar" ? 7 : 5)));
           setNewResourceIsAgent(!!res.isAgent);
         }
       };
@@ -385,17 +462,36 @@
               programs: row.state.programs || [],
               projects: row.state.projects || [],
               teamMembers: row.state.teamMembers || [],
-              resources: row.state.resources || [],
+              resources: (row.state.resources || INITIAL_EMPTY_WORKSPACE.resources).map(r => ({
+                ...r,
+                dailyHours: Number(r.dailyHours || (r.name === "Mustafa Nisar" ? 10 : 8)),
+                daysPerWeek: Number(r.daysPerWeek || (r.name === "Mustafa Nisar" ? 7 : 5))
+              })),
+              operations: row.state.operations || INITIAL_EMPTY_WORKSPACE.operations,
               risks: row.state.risks || [],
               procurements: row.state.procurements || [],
               tasks: (row.state.tasks || []).map(t => {
                 const isM = t.itemType === "Milestone" || Number(t.duration) === 0;
                 let taskAssignments = t.assignments;
                 if (!taskAssignments || taskAssignments.length === 0) {
+                  const rName = t.resource || "Lead";
+                  const cap = getResourceCapacity(rName);
+                  const alloc = Number(t.allocation || 100);
                   taskAssignments = [{
-                    name: t.resource || "Lead",
-                    allocation: Number(t.allocation || 100)
+                    name: rName,
+                    allocation: alloc,
+                    dailyHours: Math.round((cap.dailyHours * (alloc / 100)) * 10) / 10
                   }];
+                } else {
+                  taskAssignments = taskAssignments.map(a => {
+                    const cap = getResourceCapacity(a.name);
+                    const alloc = Number(a.allocation || 100);
+                    return {
+                      ...a,
+                      allocation: alloc,
+                      dailyHours: a.dailyHours !== undefined ? Number(a.dailyHours) : Math.round((cap.dailyHours * (alloc / 100)) * 10) / 10
+                    };
+                  });
                 }
                 const durVal = Number(t.duration !== undefined ? t.duration : 1);
                 const sDate = t.startDate || TODAY_ISO;
@@ -435,9 +531,11 @@
                 { id: "tm-1", email: activeUser.email, role: "Owner", permission: "Read-Write", addedAt: TODAY_ISO }
               ],
               resources: [
-                { id: freshResId, name: userHandle, role: "Program Director / Lead", isAgent: false },
-                { id: "res-agent-1", name: "Apex AI Agent", role: "Autonomous Automation Worker", isAgent: true }
+                { id: freshResId, name: userHandle, role: "Program Director / Lead", dailyHours: 10, daysPerWeek: 7, isAgent: false },
+                { id: "res-agent-gemini", name: "Gemini", role: "Autonomous AI Agent", dailyHours: 8, daysPerWeek: 7, isAgent: true },
+                { id: "res-agent-lovable", name: "Lovable", role: "Fullstack App Builder Agent", dailyHours: 6, daysPerWeek: 7, isAgent: true }
               ],
+              operations: INITIAL_EMPTY_WORKSPACE.operations,
               tasks: [],
               risks: [],
               procurements: []
@@ -536,7 +634,7 @@
         return groupedVisibleTasks.flatMap(g => g.tasks);
       }, [groupedVisibleTasks]);
 
-      // CPM Engine with Verified Date Hydration
+      // CPM Engine
       const cpmSchedule = useMemo(() => {
         if (visibleTasks.length === 0) {
           return { tasks: [], anchorDate: TODAY_ISO, totalSpanDays: 105, criticalCount: 0, rawMap: {} };
@@ -553,7 +651,7 @@
             ...t,
             itemType: t.itemType || (isMilestone ? "Milestone" : "Task"),
             duration: dur,
-            assignments: t.assignments || [{ name: t.resource || "Lead", allocation: Number(t.allocation || 100) }],
+            assignments: t.assignments || [{ name: t.resource || "Lead", allocation: Number(t.allocation || 100), dailyHours: 8 }],
             predecessors: t.predecessors || (t.predecessorId ? [{ id: t.predecessorId, type: t.depType || "FS", lag: Number(t.lag || 0) }] : []),
             esDate: sDate,
             efDate: eDate
@@ -662,13 +760,19 @@
         };
       }, [visibleTasks, data.tasks]);
 
-      // Resource Loading Heatmap
+      // UNIFIED RESOURCE LOADING HEATMAP: Computes exact Daily Hours & Capacity Percentage against each worker's base
       const resourceLoadingMap = useMemo(() => {
         const loading = {};
         (data.resources || []).forEach(r => {
-          loading[r.name] = { totalOverAllocDays: 0, days: {} };
+          const cap = getResourceCapacity(r.name);
+          loading[r.name] = {
+            totalOverAllocDays: 0,
+            capacity: cap,
+            days: {}
+          };
         });
 
+        // 1. Ingest Project Tasks
         data.tasks.forEach(task => {
           if (task.done || task.itemType === "Milestone" || task.itemType === "Summary") return;
           const start = task.startDate || TODAY_ISO;
@@ -679,32 +783,93 @@
             const dateISO = addDaysISO(start, d);
             taskAssignments.forEach(asgn => {
               const rName = asgn.name;
-              if (!loading[rName]) loading[rName] = { totalOverAllocDays: 0, days: {} };
-              if (!loading[rName].days[dateISO]) {
-                loading[rName].days[dateISO] = { totalAlloc: 0, tasks: [] };
+              const cap = getResourceCapacity(rName);
+              if (!loading[rName]) {
+                loading[rName] = { totalOverAllocDays: 0, capacity: cap, days: {} };
               }
-              loading[rName].days[dateISO].totalAlloc += Number(asgn.allocation || 100);
-              loading[rName].days[dateISO].tasks.push({
-                taskName: task.name,
-                wbs: task.wbs,
-                alloc: Number(asgn.allocation || 100)
+              if (!loading[rName].days[dateISO]) {
+                loading[rName].days[dateISO] = { totalHours: 0, projectHours: 0, opsHours: 0, items: [] };
+              }
+              // Calculate daily hours
+              const dailyH = asgn.dailyHours !== undefined
+                ? Number(asgn.dailyHours)
+                : Math.round((cap.dailyHours * (Number(asgn.allocation || 100) / 100)) * 10) / 10;
+
+              loading[rName].days[dateISO].totalHours += dailyH;
+              loading[rName].days[dateISO].projectHours += dailyH;
+              loading[rName].days[dateISO].items.push({
+                type: "Project Deliverable",
+                name: `[${task.wbs}] ${task.name}`,
+                hours: dailyH,
+                alloc: Math.round((dailyH / cap.dailyHours) * 100)
               });
             });
           }
         });
 
+        // 2. Ingest Ongoing Operational Cadences
+        const totalHorizonDays = cpmSchedule.totalSpanDays || 105;
+        const anchorISO = cpmSchedule.anchorDate || TODAY_ISO;
+
+        (data.operations || []).forEach(op => {
+          if (!op.active) return;
+          const opAssignments = op.assignments || [];
+
+          for (let d = 0; d < totalHorizonDays; d++) {
+            const dateISO = addDaysISO(anchorISO, d);
+            const dt = parseISO(dateISO);
+            const dayOfWeek = dt.getDay(); // 0 = Sun, 1 = Mon ... 6 = Sat
+
+            let runsToday = false;
+            if (op.cadence === "daily_7days") {
+              runsToday = true;
+            } else if (op.cadence === "daily_weekdays" || op.cadence === "twice_daily") {
+              runsToday = (dayOfWeek >= 1 && dayOfWeek <= 5);
+            } else if (op.cadence === "weekly_mon") {
+              runsToday = (dayOfWeek === 1);
+            }
+
+            if (runsToday) {
+              opAssignments.forEach(asgn => {
+                const rName = asgn.name;
+                const cap = getResourceCapacity(rName);
+                if (!loading[rName]) {
+                  loading[rName] = { totalOverAllocDays: 0, capacity: cap, days: {} };
+                }
+                if (!loading[rName].days[dateISO]) {
+                  loading[rName].days[dateISO] = { totalHours: 0, projectHours: 0, opsHours: 0, items: [] };
+                }
+                const dailyH = asgn.dailyHours !== undefined
+                  ? Number(asgn.dailyHours)
+                  : Math.round((cap.dailyHours * (Number(asgn.allocation || 25) / 100)) * 10) / 10;
+
+                loading[rName].days[dateISO].totalHours += dailyH;
+                loading[rName].days[dateISO].opsHours += dailyH;
+                loading[rName].days[dateISO].items.push({
+                  type: "Recurring Operation",
+                  name: op.name,
+                  hours: dailyH,
+                  alloc: Math.round((dailyH / cap.dailyHours) * 100)
+                });
+              });
+            }
+          }
+        });
+
+        // Compute total over-allocation occurrences comparing against each resource's custom daily capacity
         Object.keys(loading).forEach(rName => {
           let overCount = 0;
+          const maxDailyCap = loading[rName].capacity.dailyHours;
           Object.values(loading[rName].days).forEach(day => {
-            if (day.totalAlloc > 100) overCount++;
+            if (day.totalHours > maxDailyCap) overCount++;
           });
           loading[rName].totalOverAllocDays = overCount;
         });
 
         return loading;
-      }, [data.tasks, data.resources]);
+      }, [data.tasks, data.resources, data.operations, cpmSchedule.anchorDate, cpmSchedule.totalSpanDays]);
 
-      // Timeline scale generator with 2-day US Thanksgiving Detection
+      // Timeline scale generator
       const timelineUnits = useMemo(() => {
         const totalDays = cpmSchedule.totalSpanDays;
         const anchor = cpmSchedule.anchorDate;
@@ -795,7 +960,7 @@
         setData(prev => ({ ...prev, tasks: updated }));
       };
 
-      // Add Deliverable with Robust Dates
+      // Add Deliverable
       const handleAddItem = (e) => {
         e.preventDefault();
         if (!qaName.trim()) return;
@@ -803,6 +968,7 @@
         const isMilestone = qaType === "Milestone";
         const parsedDur = isMilestone ? 0 : Math.max(0.01, parseFloat(qaDuration) || 1);
         const assignedRes = qaResource || (data.resources[0]?.name || "Lead");
+        const cap = getResourceCapacity(assignedRes);
 
         const prjIdx = data.projects.findIndex(p => p.id === targetPrjId);
         const pSeq = prjIdx >= 0 ? prjIdx + 1 : 1;
@@ -811,6 +977,8 @@
 
         const verifiedStart = qaStartDate || TODAY_ISO;
         const verifiedEnd = isMilestone ? verifiedStart : addDaysISO(verifiedStart, Math.ceil(parsedDur));
+
+        const hoursVal = Number(qaHoursPerDay || (cap.dailyHours * (Number(qaAllocation || 100) / 100)));
 
         const newItem = {
           id: "tsk-" + Date.now(),
@@ -823,7 +991,11 @@
           endDate: verifiedEnd,
           duration: parsedDur,
           predecessors: [],
-          assignments: [{ name: assignedRes, allocation: Number(qaAllocation || 100) }],
+          assignments: [{
+            name: assignedRes,
+            allocation: Number(qaAllocation || 100),
+            dailyHours: hoursVal
+          }],
           resource: assignedRes,
           allocation: Number(qaAllocation || 100),
           status: "To Do",
@@ -837,7 +1009,7 @@
         setQaWbs("");
       };
 
-      // Field Update (Preserves valid start/end dates and allows title edits)
+      // Field Update with Dual-Mode Hours <-> Allocation Sync
       const updateTaskField = (taskId, field, value) => {
         setData(prev => ({
           ...prev,
@@ -942,6 +1114,46 @@
         }));
       };
 
+      // Operations Handlers
+      const handleAddOperation = (e) => {
+        e.preventDefault();
+        if (!newOpName.trim()) return;
+        const rName = newOpResource || (data.resources[0]?.name || "Lead");
+        const cap = getResourceCapacity(rName);
+        const hoursVal = Number(newOpHours || (cap.dailyHours * (Number(newOpAlloc || 25) / 100)));
+
+        const newOp = {
+          id: "ops-" + Date.now(),
+          name: newOpName.trim(),
+          cadence: newOpCadence,
+          active: true,
+          assignments: [
+            {
+              name: rName,
+              allocation: Number(newOpAlloc || 25),
+              dailyHours: hoursVal
+            }
+          ]
+        };
+        setData(prev => ({ ...prev, operations: [...(prev.operations || []), newOp] }));
+        setNewOpName("");
+      };
+
+      const toggleOperationActive = (opId) => {
+        setData(prev => ({
+          ...prev,
+          operations: (prev.operations || []).map(o => o.id === opId ? { ...o, active: !o.active } : o)
+        }));
+      };
+
+      const deleteOperation = (opId) => {
+        if (!confirm("Delete this recurring operation?")) return;
+        setData(prev => ({
+          ...prev,
+          operations: (prev.operations || []).filter(o => o.id !== opId)
+        }));
+      };
+
       // Full CRUD Submit Handler for Programs, Projects, Resources & Team Invites
       const handleProgramProjectSubmit = async (e) => {
         e.preventDefault();
@@ -973,6 +1185,8 @@
               id: "res-" + Date.now(),
               name: newResourceName.trim(),
               role: newResourceRole,
+              dailyHours: Number(newResourceHours || 8),
+              daysPerWeek: Number(newResourceDaysWeek || 5),
               isAgent: !!newResourceIsAgent
             };
             setData(prev => ({ ...prev, resources: [...(prev.resources || []), newRes] }));
@@ -1025,7 +1239,12 @@
             setData(prev => ({
               ...prev,
               resources: prev.resources.map(r => r.id === selectedEditResourceId ? {
-                ...r, name: newResourceName, role: newResourceRole, isAgent: !!newResourceIsAgent
+                ...r,
+                name: newResourceName,
+                role: newResourceRole,
+                dailyHours: Number(newResourceHours || 8),
+                daysPerWeek: Number(newResourceDaysWeek || 5),
+                isAgent: !!newResourceIsAgent
               } : r)
             }));
           }
@@ -1181,7 +1400,7 @@
               </div>
 
               <div className="text-xs text-slate-400 leading-relaxed">
-                Welcome to your multi-tenant PPM workspace. Cross-border stat holidays, multi-project grouping, and critical path scheduling powered by your secure DB.
+                Welcome to your multi-tenant PPM workspace. Flexible Hours & Allocation resource loading, AI agent capacities, and CPM scheduling powered by your secure DB.
               </div>
 
               <div className="space-y-3 pt-2">
@@ -1247,7 +1466,7 @@
                   </span>
                 </div>
                 <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                  Enterprise Portfolio & Critical Path Scheduling
+                  Enterprise Portfolio, Operations & CPM Scheduling
                 </div>
               </div>
             </div>
@@ -1349,6 +1568,7 @@
               <div className="space-y-1.5">
                 {[
                   { id: "gantt", label: "Gantt & CPM Engine", badge: `${cpmSchedule.criticalCount} CP` },
+                  { id: "operations", label: "Operations (Cadence)", badge: `${(data.operations || []).filter(o => o.active).length} Active` },
                   { id: "loading", label: "Resource Loading", badge: `${Object.values(resourceLoadingMap).filter(r => r.totalOverAllocDays > 0).length} Over` },
                   { id: "tasks", label: "Tasks & Effort Board", badge: visibleTasks.length },
                   { id: "risks", label: "Risk Register (RAID)", badge: (data.risks || []).length },
@@ -1388,7 +1608,7 @@
 
             {/* Main Workspace Area */}
             <main className="flex-1 p-4 md:p-6 overflow-y-auto space-y-5 bg-slate-50/50 dark:bg-[#0b1120]">
-              {/* Deliverables Quick-Add Bar */}
+              {/* Deliverables Quick-Add Bar with Linked Hours & Allocation */}
               {activeTab === "gantt" && (
                 <form
                   onSubmit={handleAddItem}
@@ -1457,24 +1677,53 @@
                     <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">Resource</label>
                     <select
                       value={qaResource}
-                      onChange={(e) => setQaResource(e.target.value)}
+                      onChange={(e) => {
+                        const rName = e.target.value;
+                        setQaResource(rName);
+                        const cap = getResourceCapacity(rName);
+                        setQaHoursPerDay(Math.round((cap.dailyHours * (Number(qaAllocation || 100) / 100)) * 10) / 10);
+                      }}
                       className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-2 py-1.5 text-xs text-slate-900 dark:text-white"
                     >
                       {(data.resources || []).map(r => (
-                        <option key={r.id} value={r.name}>{r.isAgent ? "🤖 " : ""}{r.name}</option>
+                        <option key={r.id} value={r.name}>{r.isAgent ? "🤖 " : ""}{r.name} ({r.dailyHours || 8}h/d)</option>
                       ))}
                     </select>
                   </div>
+                  {/* Linked Hours/Day */}
+                  <div className="w-20">
+                    <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">Hours/Day</label>
+                    <input
+                      type="number"
+                      step="0.5"
+                      min="0"
+                      value={qaHoursPerDay}
+                      onChange={(e) => {
+                        const h = parseFloat(e.target.value) || 0;
+                        setQaHoursPerDay(h);
+                        const cap = getResourceCapacity(qaResource || (data.resources[0]?.name || "Lead"));
+                        const calculatedAlloc = Math.min(200, Math.round((h / cap.dailyHours) * 100));
+                        setQaAllocation(calculatedAlloc);
+                      }}
+                      className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-2 py-1.5 text-xs text-slate-900 dark:text-white font-mono text-center"
+                    />
+                  </div>
+                  {/* Linked Alloc % */}
                   <div className="w-20">
                     <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">Alloc %</label>
                     <input
                       type="number"
                       min="10"
-                      max="100"
-                      step="10"
+                      max="200"
+                      step="5"
                       value={qaAllocation}
-                      onChange={(e) => setQaAllocation(e.target.value)}
-                      className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-2 py-1.5 text-xs text-slate-900 dark:text-white font-mono"
+                      onChange={(e) => {
+                        const a = parseFloat(e.target.value) || 0;
+                        setQaAllocation(a);
+                        const cap = getResourceCapacity(qaResource || (data.resources[0]?.name || "Lead"));
+                        setQaHoursPerDay(Math.round((cap.dailyHours * (a / 100)) * 10) / 10);
+                      }}
+                      className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-2 py-1.5 text-xs text-slate-900 dark:text-white font-mono text-center"
                     />
                   </div>
                   <button
@@ -1486,7 +1735,7 @@
                 </form>
               )}
 
-              {/* CARD 1: Deliverables Table Grid Grouped Cleanly by Projects with INLINE EDITABLE TITLES & HYDRATED DATES */}
+              {/* CARD 1: Deliverables Table Grid Grouped Cleanly by Projects with Dual-Mode Hours/Day */}
               {activeTab === "gantt" && (
                 <div className="bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-sm">
                   <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-800 flex justify-between items-center bg-slate-50/50 dark:bg-slate-900/50">
@@ -1494,7 +1743,7 @@
                       Deliverables, WBS & Cross-Project Dependencies (Organized by Project Track)
                     </h3>
                     <div className="text-[11px] text-slate-500">
-                      {cpmSchedule.tasks.length} items total • Click Deliverable Title to Edit Directly • Click 📝 for Scope Details
+                      {cpmSchedule.tasks.length} items total • Dual Hours & % Alloc Support • Click 📝 for Scope Details
                     </div>
                   </div>
 
@@ -1512,7 +1761,7 @@
                           <th className="min-w-[110px] px-2 py-3 border-r border-slate-200 dark:border-slate-800">START</th>
                           <th className="min-w-[110px] px-2 py-3 border-r border-slate-200 dark:border-slate-800">END</th>
                           <th className="w-18 px-1 py-3 text-center border-r border-slate-200 dark:border-slate-800">DUR (DAYS)</th>
-                          <th className="min-w-[160px] px-2 py-3 border-r border-slate-200 dark:border-slate-800">RESOURCES & EFFORT</th>
+                          <th className="min-w-[180px] px-2 py-3 border-r border-slate-200 dark:border-slate-800">RESOURCES, HOURS & EFFORT</th>
                           <th className="w-16 px-1 py-3 text-center border-r border-slate-200 dark:border-slate-800">FLOAT</th>
                           <th className="w-10 px-1 py-3 text-center">DEL</th>
                         </tr>
@@ -1652,7 +1901,6 @@
                                       </div>
                                     </td>
 
-                                    {/* GUARANTEED POPULATED START & END DATES */}
                                     <td className="px-1.5 py-1.5 border-r border-slate-200 dark:border-slate-800">
                                       <input
                                         type="date"
@@ -1684,20 +1932,21 @@
                                       />
                                     </td>
 
+                                    {/* RESOURCES, HOURS & EFFORT */}
                                     <td className="px-2 py-1.5 border-r border-slate-200 dark:border-slate-800">
                                       <div className="flex flex-wrap items-center gap-1">
                                         {(t.assignments || []).map((asgn, aIdx) => {
                                           const isAg = data.resources?.find(r => r.name === asgn.name)?.isAgent;
                                           return (
                                             <span key={aIdx} className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium border ${isAg ? 'bg-purple-500/10 text-purple-400 border-purple-500/30' : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'}`}>
-                                              <span>{isAg ? "🤖 " : ""}{asgn.name.split(" ")[0]} ({asgn.allocation}%)</span>
+                                              <span>{isAg ? "🤖 " : ""}{asgn.name.split(" ")[0]} ({asgn.dailyHours || 8}h • {asgn.allocation}%)</span>
                                             </span>
                                           );
                                         })}
                                         <button
                                           onClick={() => setAssignModalTask(t)}
                                           className="px-1.5 py-0.5 rounded border border-dashed border-slate-300 dark:border-slate-700 text-slate-500 hover:text-brand-emerald text-[10px]"
-                                          title="Edit Resource Assignments"
+                                          title="Edit Resource Assignments & Hours"
                                         >
                                           ⚙️ Assign
                                         </button>
@@ -1920,22 +2169,288 @@
                 </div>
               )}
 
-              {/* Resource Loading Heatmap Dashboard */}
+              {/* OPERATIONS & RECURRING CADENCE DASHBOARD */}
+              {activeTab === "operations" && (
+                <div className="space-y-5">
+                  <form
+                    onSubmit={handleAddOperation}
+                    className="bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-sm flex flex-wrap items-end gap-3 no-print"
+                  >
+                    <div className="flex-1 min-w-[220px]">
+                      <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+                        Recurring Operation Name
+                      </label>
+                      <input
+                        type="text"
+                        value={newOpName}
+                        onChange={(e) => setNewOpName(e.target.value)}
+                        placeholder="e.g. Daily AI Tech Chronicle Newsletter Digest, 2x Daily Audits..."
+                        className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-900 dark:text-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+                        Cadence Frequency
+                      </label>
+                      <select
+                        value={newOpCadence}
+                        onChange={(e) => setNewOpCadence(e.target.value)}
+                        className="bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-900 dark:text-white"
+                      >
+                        <option value="daily_weekdays">Daily (Mon - Fri)</option>
+                        <option value="daily_7days">Daily (Every Day / 7 Days)</option>
+                        <option value="twice_daily">2x Daily (Morning & Evening Sweeps)</option>
+                        <option value="weekly_mon">Weekly (Every Monday)</option>
+                      </select>
+                    </div>
+                    <div className="min-w-[140px]">
+                      <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+                        Assigned Worker / Agent
+                      </label>
+                      <select
+                        value={newOpResource}
+                        onChange={(e) => {
+                          const rName = e.target.value;
+                          setNewOpResource(rName);
+                          const cap = getResourceCapacity(rName);
+                          setNewOpHours(Math.round((cap.dailyHours * (Number(newOpAlloc || 25) / 100)) * 10) / 10);
+                        }}
+                        className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-900 dark:text-white"
+                      >
+                        {(data.resources || []).map(r => (
+                          <option key={r.id} value={r.name}>{r.isAgent ? "🤖 " : ""}{r.name} ({r.dailyHours || 8}h/d)</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="w-20">
+                      <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+                        Hours/Day
+                      </label>
+                      <input
+                        type="number"
+                        step="0.5"
+                        min="0"
+                        value={newOpHours}
+                        onChange={(e) => {
+                          const h = parseFloat(e.target.value) || 0;
+                          setNewOpHours(h);
+                          const cap = getResourceCapacity(newOpResource || (data.resources[0]?.name || "Lead"));
+                          setNewOpAlloc(Math.round((h / cap.dailyHours) * 100));
+                        }}
+                        className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-2 py-1.5 text-xs font-mono text-center text-slate-900 dark:text-white"
+                      />
+                    </div>
+                    <div className="w-20">
+                      <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+                        Effort %
+                      </label>
+                      <input
+                        type="number"
+                        min="5"
+                        max="100"
+                        step="5"
+                        value={newOpAlloc}
+                        onChange={(e) => {
+                          const a = parseFloat(e.target.value) || 0;
+                          setNewOpAlloc(a);
+                          const cap = getResourceCapacity(newOpResource || (data.resources[0]?.name || "Lead"));
+                          setNewOpHours(Math.round((cap.dailyHours * (a / 100)) * 10) / 10);
+                        }}
+                        className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-2 py-1.5 text-xs font-mono text-center text-slate-900 dark:text-white"
+                      />
+                    </div>
+                    <button
+                      type="submit"
+                      className="bg-brand-emerald hover:bg-brand-emeraldHover text-brand-navy font-bold text-xs px-4 py-2 rounded-lg transition shadow-sm"
+                    >
+                      + Add Cadence
+                    </button>
+                  </form>
+
+                  {/* Operations Grid Table */}
+                  <div className="bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-sm">
+                    <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-800 flex justify-between items-center bg-slate-50/50 dark:bg-slate-900/50">
+                      <div>
+                        <h3 className="font-bold text-xs uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                          Active Operational Cadences (PMI Runtime Scope)
+                        </h3>
+                        <p className="text-[11px] text-slate-500">
+                          Ongoing routines quantified in hours & % and overlaid onto enterprise resource capacity.
+                        </p>
+                      </div>
+                      <span className="text-[10px] px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-500 font-semibold border border-emerald-500/20">
+                        ● Direct Resource Overlay Active
+                      </span>
+                    </div>
+
+                    <table className="w-full border-collapse text-left text-xs">
+                      <thead>
+                        <tr className="border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                          <th className="px-4 py-3">STATUS</th>
+                          <th className="px-4 py-3">RECURRING OPERATION</th>
+                          <th className="px-4 py-3">CADENCE SCHEDULE</th>
+                          <th className="px-4 py-3">ASSIGNED WORKERS & HOURS</th>
+                          <th className="px-3 py-3 text-center">TOGGLE</th>
+                          <th className="px-3 py-3 text-center">DEL</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+                        {(data.operations || []).length === 0 ? (
+                          <tr>
+                            <td colSpan="6" className="text-center py-8 text-slate-400 text-xs">
+                              No operational cadences configured. Add your routine operations above!
+                            </td>
+                          </tr>
+                        ) : (
+                          (data.operations || []).map(op => (
+                            <tr key={op.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
+                              <td className="px-4 py-3">
+                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${op.active ? 'bg-emerald-500/10 text-emerald-500' : 'bg-slate-500/10 text-slate-400'}`}>
+                                  {op.active ? '● Running' : '○ Paused'}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3 font-semibold text-slate-900 dark:text-white">
+                                {op.name}
+                              </td>
+                              <td className="px-4 py-3 font-mono text-[11px] text-brand-emerald">
+                                {op.cadence === 'daily_weekdays' ? 'Daily (Mon - Fri)' : op.cadence === 'twice_daily' ? '2x Daily (AM & PM)' : op.cadence === 'weekly_mon' ? 'Weekly (Mondays)' : 'Daily (7 Days/Wk)'}
+                              </td>
+                              <td className="px-4 py-3">
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  {(op.assignments || []).map((asgn, aIdx) => {
+                                    const isAg = data.resources?.find(r => r.name === asgn.name)?.isAgent;
+                                    return (
+                                      <span key={aIdx} className={`px-2 py-0.5 rounded text-[10px] font-medium border ${isAg ? 'bg-purple-500/10 text-purple-400 border-purple-500/30' : 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20'}`}>
+                                        {isAg ? "🤖 " : ""}{asgn.name} ({asgn.dailyHours || 2.5}h • {asgn.allocation}%)
+                                      </span>
+                                    );
+                                  })}
+                                </div>
+                              </td>
+                              <td className="px-3 py-3 text-center">
+                                <button
+                                  onClick={() => toggleOperationActive(op.id)}
+                                  className="text-[11px] px-2 py-1 rounded bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-semibold transition"
+                                >
+                                  {op.active ? "Pause" : "Resume"}
+                                </button>
+                              </td>
+                              <td className="px-3 py-3 text-center">
+                                <button onClick={() => deleteOperation(op.id)} className="text-slate-400 hover:text-rose-500 font-bold">✕</button>
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Visual Cadence Runway Canvas */}
+                  <div className="bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-sm space-y-3">
+                    <div className="flex justify-between items-center">
+                      <h4 className="font-bold text-xs uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                        Rolling 30-Day Cadence Runway Strip
+                      </h4>
+                      <div className="text-[10px] text-slate-400 font-mono">
+                        Pips indicate scheduled execution runs
+                      </div>
+                    </div>
+
+                    <div className="overflow-x-auto">
+                      <div style={{ width: `${30 * 42 + 240}px` }} className="select-none">
+                        <div className="flex border-b border-slate-200 dark:border-slate-800 pb-2 mb-2 pl-[240px]">
+                          {timelineUnits.slice(0, 30).map(u => (
+                            <div key={u.key} style={{ width: "42px" }} className="shrink-0 text-center py-1 border-r border-slate-200 dark:border-slate-800/60">
+                              <div className="text-[10px] font-medium">{u.label}</div>
+                              <div className="text-[8px] opacity-70">{u.subLabel}</div>
+                            </div>
+                          ))}
+                        </div>
+
+                        <div className="space-y-2">
+                          {(data.operations || []).map(op => (
+                            <div key={op.id} className="flex items-center h-8 hover:bg-slate-50 dark:hover:bg-slate-800/30 rounded">
+                              <div className="w-[240px] shrink-0 pr-3 truncate text-xs font-medium text-slate-700 dark:text-slate-300 flex items-center justify-between">
+                                <span className="truncate">{op.name}</span>
+                                <span className={`text-[9px] px-1.5 py-0.2 rounded font-mono ${op.active ? 'text-brand-emerald font-bold' : 'text-slate-500'}`}>
+                                  {op.active ? 'ON' : 'OFF'}
+                                </span>
+                              </div>
+                              <div className="flex">
+                                {timelineUnits.slice(0, 30).map(u => {
+                                  const dt = parseISO(u.iso);
+                                  const dayOfWeek = dt.getDay();
+                                  let runs = false;
+                                  if (op.active) {
+                                    if (op.cadence === "daily_7days") runs = true;
+                                    else if (op.cadence === "daily_weekdays" || op.cadence === "twice_daily") runs = (dayOfWeek >= 1 && dayOfWeek <= 5);
+                                    else if (op.cadence === "weekly_mon") runs = (dayOfWeek === 1);
+                                  }
+
+                                  return (
+                                    <div key={u.key} style={{ width: "42px" }} className="shrink-0 h-6 flex items-center justify-center border-r border-slate-200 dark:border-slate-800/40">
+                                      {runs && (
+                                        <div
+                                          className={`w-3 h-3 rounded-full flex items-center justify-center shadow-sm transition ${
+                                            op.cadence === 'twice_daily'
+                                              ? 'bg-purple-500 text-[8px] text-white font-bold ring-2 ring-purple-500/20'
+                                              : op.cadence === 'weekly_mon'
+                                                ? 'bg-amber-400 text-brand-navy font-bold'
+                                                : 'bg-brand-emerald'
+                                          }`}
+                                          title={`${op.name} on ${u.iso} (${op.cadence})`}
+                                        >
+                                          {op.cadence === 'twice_daily' && '2'}
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* RESOURCE LOADING HEATMAP WITH DUAL-METRIC TOGGLE (HOURS vs ALLOCATION %) */}
               {activeTab === "loading" && (
                 <div className="space-y-4">
                   <div className="bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-sm">
                     <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
                       <div>
                         <h3 className="font-bold text-xs uppercase tracking-wider text-slate-700 dark:text-slate-300">
-                          Cross-Project Resource Allocation & Loading Heatmap
+                          Cross-Project & Operations Resource Allocation Heatmap
                         </h3>
                         <p className="text-[11px] text-slate-500">
-                          Tracks total daily commitments across all programs. Red cells indicate over-allocation (&gt;100%).
+                          Total daily commitments calibrated to each resource's custom workday (Mustafa: 10h/day, 7d/week).
                         </p>
                       </div>
-                      <div className="flex items-center gap-3 text-[11px]">
-                        <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-emerald-500/20 border border-emerald-500 text-emerald-600 text-[9px] flex items-center justify-center font-bold">ok</span> Balanced (&le;100%)</span>
-                        <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-rose-500 text-white text-[9px] flex items-center justify-center font-bold">!</span> Over-allocated (&gt;100%)</span>
+
+                      <div className="flex items-center gap-3">
+                        {/* Metric Unit Toggle: Hours vs Percentage */}
+                        <div className="flex p-0.5 bg-slate-200 dark:bg-slate-800 rounded-lg text-[10px] font-semibold">
+                          <button
+                            onClick={() => setHeatmapMetric("hours")}
+                            className={`px-3 py-1 rounded-md transition ${heatmapMetric === 'hours' ? 'bg-brand-emerald text-brand-navy font-bold shadow-sm' : 'text-slate-600 dark:text-slate-400'}`}
+                          >
+                            Hours (h)
+                          </button>
+                          <button
+                            onClick={() => setHeatmapMetric("percentage")}
+                            className={`px-3 py-1 rounded-md transition ${heatmapMetric === 'percentage' ? 'bg-brand-emerald text-brand-navy font-bold shadow-sm' : 'text-slate-600 dark:text-slate-400'}`}
+                          >
+                            Allocation (%)
+                          </button>
+                        </div>
+
+                        <div className="flex items-center gap-2 text-[11px] border-l border-slate-300 dark:border-slate-700 pl-3">
+                          <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-emerald-500/20 border border-emerald-500 text-emerald-600 text-[9px] flex items-center justify-center font-bold">ok</span> Balanced</span>
+                          <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-rose-500 text-white text-[9px] flex items-center justify-center font-bold">!</span> Over-allocated</span>
+                        </div>
                       </div>
                     </div>
 
@@ -1943,10 +2458,10 @@
                       <table className="w-full border-collapse text-xs text-left">
                         <thead>
                           <tr className="border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 text-[10px] font-bold uppercase text-slate-500">
-                            <th className="px-4 py-3 min-w-[180px] sticky left-0 bg-slate-50 dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800">RESOURCE NAME</th>
+                            <th className="px-4 py-3 min-w-[200px] sticky left-0 bg-slate-50 dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800">RESOURCE & CAPACITY</th>
                             <th className="px-3 py-3 w-28 text-center border-r border-slate-200 dark:border-slate-800">STATUS</th>
                             {timelineUnits.slice(0, 30).map(u => (
-                              <th key={u.key} className="px-1 py-3 text-center border-r border-slate-200 dark:border-slate-800/60 min-w-[42px]">
+                              <th key={u.key} className="px-1 py-3 text-center border-r border-slate-200 dark:border-slate-800/60 min-w-[46px]">
                                 <div>{u.label}</div>
                                 <div className="text-[8px] opacity-60">{u.subLabel}</div>
                               </th>
@@ -1955,8 +2470,10 @@
                         </thead>
                         <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
                           {(data.resources || []).map(res => {
-                            const load = resourceLoadingMap[res.name] || { totalOverAllocDays: 0, days: {} };
+                            const load = resourceLoadingMap[res.name] || { totalOverAllocDays: 0, capacity: { dailyHours: 8, daysPerWeek: 5 }, days: {} };
                             const isOver = load.totalOverAllocDays > 0;
+                            const maxDailyH = load.capacity.dailyHours;
+
                             return (
                               <tr key={res.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
                                 <td className="px-4 py-3 sticky left-0 bg-white dark:bg-[#111827] border-r border-slate-200 dark:border-slate-800">
@@ -1964,7 +2481,9 @@
                                     {res.isAgent && <span title="AI Autonomous Agent">🤖</span>}
                                     {res.name}
                                   </div>
-                                  <div className="text-[10px] text-slate-500">{res.role}</div>
+                                  <div className="text-[10px] text-brand-emerald font-mono">
+                                    Base: {maxDailyH}h/d • {res.daysPerWeek || 5}d/w ({maxDailyH * (res.daysPerWeek || 5)}h total)
+                                  </div>
                                 </td>
                                 <td className="px-3 py-3 text-center border-r border-slate-200 dark:border-slate-800">
                                   {isOver ? (
@@ -1979,21 +2498,31 @@
                                 </td>
                                 {timelineUnits.slice(0, 30).map(u => {
                                   const dayData = load.days[u.iso];
-                                  const alloc = dayData ? dayData.totalAlloc : 0;
-                                  const dayOver = alloc > 100;
+                                  const totalH = dayData ? dayData.totalHours : 0;
+                                  const allocPct = Math.round((totalH / maxDailyH) * 100);
+                                  const dayOver = totalH > maxDailyH;
+                                  const prjH = dayData ? dayData.projectHours : 0;
+                                  const opsH = dayData ? dayData.opsHours : 0;
+
+                                  const cellDisplayText = totalH === 0
+                                    ? "—"
+                                    : heatmapMetric === "hours"
+                                      ? `${totalH}h`
+                                      : `${allocPct}%`;
+
                                   return (
                                     <td
                                       key={u.key}
                                       className={`px-1 py-2 text-center border-r border-slate-200 dark:border-slate-800/60 font-mono text-[10px] ${
-                                        alloc === 0
+                                        totalH === 0
                                           ? "text-slate-400 opacity-40"
                                           : dayOver
                                             ? "bg-rose-500 text-white font-bold"
                                             : "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-semibold"
                                       }`}
-                                      title={dayData ? `${res.name} on ${u.iso}: ${alloc}%\n` + dayData.tasks.map(t => `• [${t.wbs}] ${t.taskName} (${t.alloc}%)`).join("\n") : "Available"}
+                                      title={dayData ? `${res.name} on ${u.iso}:\nTotal Load: ${totalH}h / ${maxDailyH}h (${allocPct}%)\n• Project Demand: ${prjH}h\n• Operations Demand: ${opsH}h\n\nBreakdown:\n` + dayData.items.map(i => `[${i.type}] ${i.name} (${i.hours}h • ${i.alloc}%)`).join("\n") : "Available"}
                                     >
-                                      {alloc > 0 ? `${alloc}%` : "—"}
+                                      {cellDisplayText}
                                     </td>
                                   );
                                 })}
@@ -2336,63 +2865,101 @@
             </div>
           )}
 
-          {/* Multiple Resource Assignment Modal */}
+          {/* DUAL-INPUT RESOURCE ASSIGNMENT MODAL (Synchronized Hours/Day ⇄ Allocation %) */}
           {assignModalTask && (
             <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-              <div className="bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-800 rounded-3xl p-6 w-full max-w-md space-y-4 shadow-2xl">
+              <div className="bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-800 rounded-3xl p-6 w-full max-w-lg space-y-4 shadow-2xl">
                 <div className="flex items-center justify-between">
                   <div>
                     <h3 className="font-bold text-base text-slate-900 dark:text-white">
-                      Assign Resources to {assignModalTask.wbs}
+                      Assign Resources & Work Hours to {assignModalTask.wbs}
                     </h3>
                     <p className="text-xs text-slate-500 truncate">{assignModalTask.name}</p>
                   </div>
                   <button type="button" onClick={() => setAssignModalTask(null)} className="text-slate-400 hover:text-white">✕</button>
                 </div>
 
-                <div className="space-y-2.5 max-h-64 overflow-y-auto">
-                  {(assignModalTask.assignments || []).map((asgn, idx) => (
-                    <div key={idx} className="flex items-center gap-2 p-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
-                      <select
-                        value={asgn.name}
-                        onChange={(e) => {
-                          const updated = [...assignModalTask.assignments];
-                          updated[idx].name = e.target.value;
-                          setAssignModalTask({ ...assignModalTask, assignments: updated });
-                        }}
-                        className="flex-1 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-2 py-1 text-xs"
-                      >
-                        {(data.resources || []).map(r => (
-                          <option key={r.id} value={r.name}>{r.isAgent ? "🤖 " : ""}{r.name}</option>
-                        ))}
-                      </select>
-                      <div className="flex items-center gap-1">
-                        <input
-                          type="number"
-                          min="10"
-                          max="100"
-                          step="10"
-                          value={asgn.allocation}
-                          onChange={(e) => {
-                            const updated = [...assignModalTask.assignments];
-                            updated[idx].allocation = Number(e.target.value);
+                <div className="space-y-2.5 max-h-64 overflow-y-auto pr-1">
+                  {(assignModalTask.assignments || []).map((asgn, idx) => {
+                    const cap = getResourceCapacity(asgn.name);
+                    const currentH = asgn.dailyHours !== undefined
+                      ? Number(asgn.dailyHours)
+                      : Math.round((cap.dailyHours * (Number(asgn.allocation || 100) / 100)) * 10) / 10;
+
+                    return (
+                      <div key={idx} className="flex items-center gap-2 p-2.5 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+                        <div className="flex-1 min-w-[130px]">
+                          <select
+                            value={asgn.name}
+                            onChange={(e) => {
+                              const newName = e.target.value;
+                              const newCap = getResourceCapacity(newName);
+                              const updated = [...assignModalTask.assignments];
+                              const alloc = Number(updated[idx].allocation || 100);
+                              updated[idx].name = newName;
+                              updated[idx].dailyHours = Math.round((newCap.dailyHours * (alloc / 100)) * 10) / 10;
+                              setAssignModalTask({ ...assignModalTask, assignments: updated });
+                            }}
+                            className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-2 py-1 text-xs text-slate-900 dark:text-white"
+                          >
+                            {(data.resources || []).map(r => (
+                              <option key={r.id} value={r.name}>{r.isAgent ? "🤖 " : ""}{r.name} (Base: {r.dailyHours || 8}h/d)</option>
+                            ))}
+                          </select>
+                        </div>
+
+                        {/* Synchronized Hours/Day Input */}
+                        <div className="w-24">
+                          <label className="block text-[8px] uppercase tracking-wider text-slate-400 font-bold">Hours/Day</label>
+                          <input
+                            type="number"
+                            step="0.5"
+                            min="0"
+                            max={cap.dailyHours * 2}
+                            value={currentH}
+                            onChange={(e) => {
+                              const h = parseFloat(e.target.value) || 0;
+                              const updated = [...assignModalTask.assignments];
+                              updated[idx].dailyHours = h;
+                              updated[idx].allocation = Math.min(200, Math.round((h / cap.dailyHours) * 100));
+                              setAssignModalTask({ ...assignModalTask, assignments: updated });
+                            }}
+                            className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded px-1.5 py-0.5 text-xs font-mono text-center text-slate-900 dark:text-white"
+                          />
+                        </div>
+
+                        {/* Synchronized Allocation % Input */}
+                        <div className="w-20">
+                          <label className="block text-[8px] uppercase tracking-wider text-slate-400 font-bold">Alloc %</label>
+                          <input
+                            type="number"
+                            min="5"
+                            max="200"
+                            step="5"
+                            value={asgn.allocation}
+                            onChange={(e) => {
+                              const a = parseFloat(e.target.value) || 0;
+                              const updated = [...assignModalTask.assignments];
+                              updated[idx].allocation = a;
+                              updated[idx].dailyHours = Math.round((cap.dailyHours * (a / 100)) * 10) / 10;
+                              setAssignModalTask({ ...assignModalTask, assignments: updated });
+                            }}
+                            className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded px-1.5 py-0.5 text-xs font-mono text-center text-slate-900 dark:text-white"
+                          />
+                        </div>
+
+                        <button
+                          onClick={() => {
+                            const updated = assignModalTask.assignments.filter((_, i) => i !== idx);
                             setAssignModalTask({ ...assignModalTask, assignments: updated });
                           }}
-                          className="w-16 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-2 py-1 text-xs font-mono text-center"
-                        />
-                        <span className="text-xs text-slate-500">%</span>
+                          className="text-slate-400 hover:text-rose-500 font-bold px-1 mt-3"
+                        >
+                          ✕
+                        </button>
                       </div>
-                      <button
-                        onClick={() => {
-                          const updated = assignModalTask.assignments.filter((_, i) => i !== idx);
-                          setAssignModalTask({ ...assignModalTask, assignments: updated });
-                        }}
-                        className="text-slate-400 hover:text-rose-500 font-bold px-1"
-                      >
-                        ✕
-                      </button>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
 
                 <button
@@ -2400,9 +2967,14 @@
                   onClick={() => {
                     const existing = assignModalTask.assignments || [];
                     const available = (data.resources || []).find(r => !existing.some(e => e.name === r.name)) || data.resources[0];
+                    const cap = getResourceCapacity(available ? available.name : "Lead");
                     setAssignModalTask({
                       ...assignModalTask,
-                      assignments: [...existing, { name: available ? available.name : "Team Member", allocation: 50 }]
+                      assignments: [...existing, {
+                        name: available ? available.name : "Team Member",
+                        allocation: 50,
+                        dailyHours: Math.round(cap.dailyHours * 0.5 * 10) / 10
+                      }]
                     });
                   }}
                   className="w-full py-1.5 rounded-xl border border-dashed border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:text-brand-emerald text-xs font-semibold"
@@ -2509,13 +3081,13 @@
             </div>
           )}
 
-          {/* Manage Modal */}
+          {/* Manage Modal with Configurable Resource Daily Hours & Schedule */}
           {showManageModal && (
             <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
               <div className="bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-800 rounded-3xl p-6 w-full max-w-xl space-y-4 shadow-2xl">
                 <div className="flex items-center justify-between">
                   <h3 className="font-bold text-base text-slate-900 dark:text-white">
-                    Portfolio, Access & Resource Manager
+                    Portfolio, Access & Resource Capacity Manager
                   </h3>
                   <button type="button" onClick={() => setShowManageModal(false)} className="text-slate-400 hover:text-white">✕</button>
                 </div>
@@ -2641,13 +3213,13 @@
                           className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-xs font-semibold text-slate-900 dark:text-white"
                         >
                           {data.resources.map(r => (
-                            <option key={r.id} value={r.id}>{r.isAgent ? "🤖 " : ""}{r.name} ({r.role})</option>
+                            <option key={r.id} value={r.id}>{r.isAgent ? "🤖 " : ""}{r.name} ({r.role}) — {r.dailyHours || 8}h/d, {r.daysPerWeek || 5}d/w</option>
                           ))}
                         </select>
                       </div>
                     )}
 
-                    {/* SUPERIOR UX FOR TEAM INVITE: In Edit Active, display and manage permissions table directly */}
+                    {/* Team Permissions Management */}
                     {manageType === "team" && manageAction === "edit" ? (
                       <div className="space-y-3">
                         <label className="block text-[10px] font-bold uppercase text-brand-emerald">
@@ -2702,19 +3274,16 @@
                             <option value="Viewer">Viewer (Read-Only Access)</option>
                           </select>
                         </div>
-                        <p className="text-[10px] text-slate-500">
-                          Adding a member sends an automated invitation email containing a secure magic-link to join your workspace.
-                        </p>
                       </div>
                     ) : manageType === "resource" ? (
                       <div className="space-y-3">
                         <div>
-                          <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Resource Name</label>
+                          <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Resource / Agent Name</label>
                           <input
                             type="text"
                             value={newResourceName}
                             onChange={(e) => setNewResourceName(e.target.value)}
-                            placeholder="e.g. Alex Chen or Compliance Bot"
+                            placeholder="e.g. Mustafa Nisar, Gemini, Lovable"
                             className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-xs"
                           />
                         </div>
@@ -2724,10 +3293,40 @@
                             type="text"
                             value={newResourceRole}
                             onChange={(e) => setNewResourceRole(e.target.value)}
-                            placeholder="e.g. Fullstack Engineer or Autonomous Code Agent"
+                            placeholder="e.g. Lead Architect or Autonomous Automation Agent"
                             className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-xs"
                           />
                         </div>
+
+                        {/* Configurable Work Hours & Work Days Schedule */}
+                        <div className="grid grid-cols-2 gap-3 p-3 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800">
+                          <div>
+                            <label className="block text-[10px] font-bold uppercase text-brand-emerald mb-1">Daily Work Hours</label>
+                            <input
+                              type="number"
+                              min="1"
+                              max="24"
+                              value={newResourceHours}
+                              onChange={(e) => setNewResourceHours(Number(e.target.value))}
+                              className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-2 py-1.5 text-xs font-mono"
+                            />
+                            <span className="text-[9px] text-slate-400">Mustafa: 10h/day</span>
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-bold uppercase text-brand-emerald mb-1">Days Per Week</label>
+                            <select
+                              value={newResourceDaysWeek}
+                              onChange={(e) => setNewResourceDaysWeek(Number(e.target.value))}
+                              className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-2 py-1.5 text-xs font-mono"
+                            >
+                              <option value="5">5 Days (Mon - Fri)</option>
+                              <option value="6">6 Days (Mon - Sat)</option>
+                              <option value="7">7 Days (Mon - Sun / Full Week)</option>
+                            </select>
+                            <span className="text-[9px] text-slate-400">Mustafa: 7d/week = 70h</span>
+                          </div>
+                        </div>
+
                         <div className="flex items-center gap-2 pt-1">
                           <input
                             type="checkbox"
@@ -2737,7 +3336,7 @@
                             className="accent-brand-emerald"
                           />
                           <label htmlFor="isAgentCheck" className="text-xs text-slate-300 font-medium">
-                            Register as an <strong>Autonomous AI Agent</strong>
+                            Register as an <strong>Autonomous AI Agent</strong> (Tracks hourly active duty window)
                           </label>
                         </div>
                       </div>
@@ -2886,7 +3485,7 @@
                           <div key={res.id} className="flex items-center justify-between p-2.5 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 text-xs">
                             <div>
                               <span className="font-bold text-slate-900 dark:text-white">{res.isAgent ? "🤖 " : ""}{res.name}</span>
-                              <span className="text-[10px] text-slate-500 ml-2">({res.role})</span>
+                              <span className="text-[10px] text-slate-500 ml-2">({res.role}) • {res.dailyHours || 8}h/d, {res.daysPerWeek || 5}d/w</span>
                             </div>
                             <div className="flex items-center gap-2">
                               <button
@@ -2940,10 +3539,14 @@
                     <p className="text-[11px] text-slate-500">Date: {new Date().toLocaleDateString("en-US", { dateStyle: "full" })}</p>
                   </div>
 
-                  <div className="grid grid-cols-3 gap-3">
+                  <div className="grid grid-cols-4 gap-3">
                     <div className="p-3 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700">
                       <div className="text-[10px] text-slate-400 font-bold uppercase">Total Deliverables</div>
                       <div className="text-lg font-bold">{cpmSchedule.tasks.length}</div>
+                    </div>
+                    <div className="p-3 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700">
+                      <div className="text-[10px] text-slate-400 font-bold uppercase">Active Operations</div>
+                      <div className="text-lg font-bold text-brand-emerald">{(data.operations || []).filter(o => o.active).length}</div>
                     </div>
                     <div className="p-3 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700">
                       <div className="text-[10px] text-slate-400 font-bold uppercase">Critical Path Count</div>
@@ -2966,7 +3569,7 @@
                         <th className="p-2 border border-slate-300 dark:border-slate-700">End Date</th>
                         <th className="p-2 border border-slate-300 dark:border-slate-700">Dur</th>
                         <th className="p-2 border border-slate-300 dark:border-slate-700">Float</th>
-                        <th className="p-2 border border-slate-300 dark:border-slate-700">Resources</th>
+                        <th className="p-2 border border-slate-300 dark:border-slate-700">Resources & Hours</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -2980,7 +3583,7 @@
                           <td className="p-2 border border-slate-300 dark:border-slate-700">{t.duration}d</td>
                           <td className="p-2 border border-slate-300 dark:border-slate-700">{t.float}d</td>
                           <td className="p-2 border border-slate-300 dark:border-slate-700">
-                            {(t.assignments || []).map(a => `${a.name} (${a.allocation}%)`).join(", ") || t.resource}
+                            {(t.assignments || []).map(a => `${a.name} (${a.dailyHours || 8}h • ${a.allocation}%)`).join(", ") || t.resource}
                           </td>
                         </tr>
                       ))}
