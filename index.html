@@ -98,18 +98,32 @@
     const TODAY_ISO = new Date().toISOString().slice(0, 10);
     const THEME_KEY = "apexpms_theme";
 
-    // Canadian & Alberta Statutory Holidays
-    const STAT_HOLIDAYS_2026 = [
-      { date: "2026-01-01", name: "New Year's Day" },
-      { date: "2026-02-16", name: "Family Day" },
-      { date: "2026-04-03", name: "Good Friday" },
-      { date: "2026-05-18", name: "Victoria Day" },
-      { date: "2026-07-01", name: "Canada Day" },
-      { date: "2026-08-03", name: "Heritage Day" },
-      { date: "2026-09-07", name: "Labour Day" },
-      { date: "2026-10-12", name: "Thanksgiving" },
-      { date: "2026-11-11", name: "Remembrance Day" },
-      { date: "2026-12-25", name: "Christmas Day" }
+    // Canadian (Alberta) & US Statutory Holidays (2026)
+    const CA_STAT_HOLIDAYS_2026 = [
+      { date: "2026-01-01", name: "New Year's Day (CA/US)" },
+      { date: "2026-02-16", name: "Family Day (AB)" },
+      { date: "2026-04-03", name: "Good Friday (CA)" },
+      { date: "2026-05-18", name: "Victoria Day (CA)" },
+      { date: "2026-07-01", name: "Canada Day (CA)" },
+      { date: "2026-08-03", name: "Heritage Day (AB)" },
+      { date: "2026-09-07", name: "Labour Day (CA/US)" },
+      { date: "2026-10-12", name: "Thanksgiving (CA)" },
+      { date: "2026-11-11", name: "Remembrance Day (CA)" },
+      { date: "2026-12-25", name: "Christmas Day (CA/US)" }
+    ];
+
+    const US_STAT_HOLIDAYS_2026 = [
+      { date: "2026-01-01", name: "New Year's Day (US/CA)" },
+      { date: "2026-01-19", name: "Martin Luther King Jr. Day (US)" },
+      { date: "2026-02-16", name: "Presidents' Day (US)" },
+      { date: "2026-05-25", name: "Memorial Day (US)" },
+      { date: "2026-06-19", name: "Juneteenth (US)" },
+      { date: "2026-07-04", name: "Independence Day (US)" },
+      { date: "2026-09-07", name: "Labor Day (US/CA)" },
+      { date: "2026-10-12", name: "Columbus Day / Indigenous Peoples (US)" },
+      { date: "2026-11-11", name: "Veterans Day (US)" },
+      { date: "2026-11-26", name: "Thanksgiving (US)" },
+      { date: "2026-12-25", name: "Christmas Day (US/CA)" }
     ];
 
     const parseISO = (str) => {
@@ -208,9 +222,22 @@
       const [selectedProjectId, setSelectedProjectId] = useState("ALL");
       const [activeTab, setActiveTab] = useState("gantt");
 
-      // Gantt Zoom & Timeline Scale
+      // Gantt Zoom & Timeline Scale & Holiday Region Selector
       const [ganttScale, setGanttScale] = useState("day");
-      const [showHolidays, setShowHolidays] = useState(true);
+      const [holidayRegion, setHolidayRegion] = useState("CA_AB"); // "CA_AB" | "US" | "BOTH" | "NONE"
+
+      const activeStatHolidays = useMemo(() => {
+        if (holidayRegion === "CA_AB") return CA_STAT_HOLIDAYS_2026;
+        if (holidayRegion === "US") return US_STAT_HOLIDAYS_2026;
+        if (holidayRegion === "BOTH") {
+          const map = {};
+          [...CA_STAT_HOLIDAYS_2026, ...US_STAT_HOLIDAYS_2026].forEach(h => {
+            map[h.date] = map[h.date] ? `${map[h.date]} / ${h.name}` : h.name;
+          });
+          return Object.keys(map).map(date => ({ date, name: map[date] }));
+        }
+        return [];
+      }, [holidayRegion]);
 
       // Modals
       const [showManageModal, setShowManageModal] = useState(false);
@@ -220,25 +247,26 @@
       const [descModalTask, setDescModalTask] = useState(null);
 
       // Management Form State
-      const [manageAction, setManageAction] = useState("create");
+      const [manageAction, setManageAction] = useState("edit"); // "create" | "edit" | "list"
       const [manageType, setManageType] = useState("project"); // "program" | "project" | "resource" | "team"
-      const [targetEntityId, setTargetEntityId] = useState("");
+      const [selectedEditProgramId, setSelectedEditProgramId] = useState("");
+      const [selectedEditProjectId, setSelectedEditProjectId] = useState("");
       const [editCode, setEditCode] = useState("");
       const [editName, setEditName] = useState("");
       const [editManager, setEditManager] = useState("");
       const [editBudget, setEditBudget] = useState(100000);
       const [editMethodology, setEditMethodology] = useState("Hybrid Agile");
       const [editParentPgmId, setEditParentPgmId] = useState("");
-      
+
       // Resource / Team Form State
       const [newResourceName, setNewResourceName] = useState("");
       const [newResourceRole, setNewResourceRole] = useState("Team Member");
       const [newResourceIsAgent, setNewResourceIsAgent] = useState(false);
       const [newMemberEmail, setNewMemberEmail] = useState("");
-      const [newMemberRole, setNewMemberRole] = useState("Editor"); // "Editor" (Read-Write) or "Viewer" (Read-Only)
+      const [newMemberRole, setNewMemberRole] = useState("Editor");
 
       // Quick-Add Inputs
-      const [qaType, setQaType] = useState("Task"); // "Task" | "Milestone" | "Summary"
+      const [qaType, setQaType] = useState("Task");
       const [qaWbs, setQaWbs] = useState("");
       const [qaName, setQaName] = useState("");
       const [qaStartDate, setQaStartDate] = useState(TODAY_ISO);
@@ -252,14 +280,38 @@
         }
       }, [data.resources]);
 
-      // Calculate next suggested WBS based on project index
-      const activeProjectIndex = useMemo(() => {
-        if (selectedProjectId !== "ALL") {
-          const idx = data.projects.findIndex(p => p.id === selectedProjectId);
-          return idx >= 0 ? idx + 1 : 1;
+      // When opening or switching Edit Active, bind to actual selected project / program
+      const loadProjectForEdit = (prjId) => {
+        const prj = data.projects.find(p => p.id === prjId) || data.projects[0];
+        if (prj) {
+          setSelectedEditProjectId(prj.id);
+          setEditCode(prj.code);
+          setEditName(prj.name);
+          setEditMethodology(prj.methodology || "Hybrid Agile");
         }
-        return 1;
-      }, [selectedProjectId, data.projects]);
+      };
+
+      const loadProgramForEdit = (pgmId) => {
+        const pgm = data.programs.find(p => p.id === pgmId) || data.programs[0];
+        if (pgm) {
+          setSelectedEditProgramId(pgm.id);
+          setEditCode(pgm.code);
+          setEditName(pgm.name);
+          setEditManager(pgm.manager || "");
+          setEditBudget(pgm.budget || 100000);
+        }
+      };
+
+      const openManageModal = () => {
+        setManageAction("edit");
+        setManageType("project");
+        // Bind to active project if selected, else first project
+        const targetPrjId = selectedProjectId !== "ALL" ? selectedProjectId : (data.projects[0]?.id || "");
+        loadProjectForEdit(targetPrjId);
+        const targetPgmId = selectedProgramId !== "ALL" ? selectedProgramId : (data.programs[0]?.id || "");
+        loadProgramForEdit(targetPgmId);
+        setShowManageModal(true);
+      };
 
       // Risk Quick-Add State
       const [newRisk, setNewRisk] = useState({
@@ -302,7 +354,6 @@
         return () => subscription.unsubscribe();
       }, [dbClient]);
 
-      // Pull workspace from Cloud DB
       const pullWorkspace = async (activeUser) => {
         if (!dbClient || !activeUser) return;
         try {
@@ -447,20 +498,28 @@
         return data.projects.filter(p => p.programId === selectedProgramId);
       }, [data.projects, selectedProgramId]);
 
-      const visibleTasks = useMemo(() => {
-        return data.tasks.filter(t => {
-          if (selectedProjectId !== "ALL") {
-            const activePrj = data.projects.find(p => p.id === selectedProjectId);
-            return t.projectId === selectedProjectId || (activePrj && t.projectId === activePrj.code);
-          }
-          if (selectedProgramId !== "ALL") {
-            return programProjects.some(p => p.id === t.projectId || p.code === t.projectId);
-          }
-          return true;
-        });
-      }, [data.tasks, selectedProjectId, selectedProgramId, programProjects]);
+      // GROUPED TASKS BY PROJECT: Guarantees PRJ-01 tasks stay together, then PRJ-02 tasks, etc.
+      const groupedVisibleTasks = useMemo(() => {
+        const activeProjects = selectedProjectId !== "ALL"
+          ? data.projects.filter(p => p.id === selectedProjectId)
+          : (selectedProgramId !== "ALL" ? programProjects : data.projects);
 
-      // Float / Decimal CPM Engine with Hierarchical Summary Task Rollups
+        return activeProjects.map((prj, pIdx) => {
+          const prjTasks = data.tasks.filter(t => t.projectId === prj.id || t.projectId === prj.code);
+          return {
+            project: prj,
+            projectIndex: pIdx + 1,
+            tasks: prjTasks
+          };
+        }).filter(g => g.tasks.length > 0 || selectedProjectId !== "ALL");
+      }, [data.tasks, data.projects, selectedProjectId, selectedProgramId, programProjects]);
+
+      // Flattened for CPM forward/backward calculations while preserving project grouping sequence
+      const visibleTasks = useMemo(() => {
+        return groupedVisibleTasks.flatMap(g => g.tasks);
+      }, [groupedVisibleTasks]);
+
+      // CPM Engine with Hierarchical Summary Task Rollups
       const cpmSchedule = useMemo(() => {
         if (visibleTasks.length === 0) {
           return { tasks: [], anchorDate: TODAY_ISO, totalSpanDays: 30, criticalCount: 0, rawMap: {} };
@@ -514,7 +573,7 @@
           });
         }
 
-        // Summary Task Rollups: Aggregates bounds of child tasks matching WBS prefix
+        // Summary Task Rollups
         Object.values(taskMap).forEach(summaryCandidate => {
           if (summaryCandidate.itemType === "Summary") {
             const prefix = summaryCandidate.wbs + ".";
@@ -583,7 +642,7 @@
         };
       }, [visibleTasks, data.tasks]);
 
-      // Cross-Project Resource Loading & Over-Allocation Calculation
+      // Cross-Project Resource Loading Heatmap
       const resourceLoadingMap = useMemo(() => {
         const loading = {};
         (data.resources || []).forEach(r => {
@@ -625,7 +684,7 @@
         return loading;
       }, [data.tasks, data.resources]);
 
-      // Timeline scale generator
+      // Timeline scale generator with Stat Holiday Mapping
       const timelineUnits = useMemo(() => {
         const totalDays = cpmSchedule.totalSpanDays;
         const anchor = cpmSchedule.anchorDate;
@@ -633,7 +692,7 @@
         if (ganttScale === "day") {
           return Array.from({ length: totalDays }, (_, i) => {
             const iso = addDaysISO(anchor, i);
-            const holiday = STAT_HOLIDAYS_2026.find(h => h.date === iso);
+            const holiday = activeStatHolidays.find(h => h.date === iso);
             return {
               key: i,
               label: formatShortDate(iso),
@@ -685,7 +744,7 @@
             };
           });
         }
-      }, [cpmSchedule.totalSpanDays, cpmSchedule.anchorDate, ganttScale]);
+      }, [cpmSchedule.totalSpanDays, cpmSchedule.anchorDate, ganttScale, activeStatHolidays]);
 
       const pxPerDay = useMemo(() => {
         if (ganttScale === "day") return 42;
@@ -716,9 +775,11 @@
         const parsedDur = isMilestone ? 0 : Math.max(0.01, parseFloat(qaDuration) || 1);
         const assignedRes = qaResource || (data.resources[0]?.name || "Lead");
 
-        // WBS auto-sequencing: e.g. Project 1 -> 1.1, Project 2 -> 2.1
+        // Compute project sequence prefix
+        const prjIdx = data.projects.findIndex(p => p.id === targetPrjId);
+        const pSeq = prjIdx >= 0 ? prjIdx + 1 : 1;
         const prjTasks = data.tasks.filter(t => t.projectId === targetPrjId);
-        const suggestedWbs = `${activeProjectIndex}.${prjTasks.length + 1}`;
+        const suggestedWbs = `${pSeq}.${prjTasks.length + 1}`;
 
         const newItem = {
           id: "tsk-" + Date.now(),
@@ -812,7 +873,6 @@
         }));
       };
 
-      // Multi-Resource Assignment Updates
       const updateTaskAssignments = (taskId, newAssignments) => {
         setData(prev => ({
           ...prev,
@@ -828,7 +888,6 @@
         }));
       };
 
-      // Cross-Project Predecessor Links
       const addPredecessor = (taskId, predId, type = "FS", lag = 0) => {
         if (!predId || predId === taskId) return;
         setData(prev => ({
@@ -852,14 +911,13 @@
         }));
       };
 
-      // Program / Project / Resource / Team Member Handlers
+      // Program / Project / Resource Handlers
       const handleProgramProjectSubmit = async (e) => {
         e.preventDefault();
 
         if (manageAction === "create") {
           if (manageType === "team") {
             if (!newMemberEmail.trim()) return;
-            // Invite team member via email flow
             const newMember = {
               id: "tm-" + Date.now(),
               email: newMemberEmail.trim(),
@@ -869,13 +927,12 @@
             };
             setData(prev => ({ ...prev, teamMembers: [...(prev.teamMembers || []), newMember] }));
 
-            // Dispatch Supabase invite OTP workflow
             if (dbClient) {
               try {
                 await dbClient.auth.signInWithOtp({ email: newMemberEmail.trim() });
-                alert(`Invitation sent to ${newMemberEmail.trim()}! They will receive a magic login link to access the workspace.`);
+                alert(`Invitation sent to ${newMemberEmail.trim()}!`);
               } catch (err) {
-                alert(`Team member added. Email notice could not be sent: ${err.message}`);
+                alert(`Team member added. Notice could not be dispatched: ${err.message}`);
               }
             }
             setNewMemberEmail("");
@@ -922,14 +979,14 @@
           if (manageType === "program") {
             setData(prev => ({
               ...prev,
-              programs: prev.programs.map(p => p.id === targetEntityId ? {
+              programs: prev.programs.map(p => p.id === selectedEditProgramId ? {
                 ...p, code: editCode, name: editName, manager: editManager, budget: Number(editBudget || 0)
               } : p)
             }));
           } else if (manageType === "project") {
             setData(prev => ({
               ...prev,
-              projects: prev.projects.map(p => p.id === targetEntityId ? {
+              projects: prev.projects.map(p => p.id === selectedEditProjectId ? {
                 ...p, code: editCode, name: editName, methodology: editMethodology
               } : p)
             }));
@@ -1086,7 +1143,7 @@
               </div>
 
               <div className="text-xs text-slate-400 leading-relaxed">
-                Welcome to your multi-tenant PPM workspace. AI Agent assignees, summary rollups, resource load heatmaps, and procurement controls powered by your secure DB.
+                Welcome to your multi-tenant PPM workspace. Cross-border stat holidays, multi-project grouping, and critical path scheduling powered by your secure DB.
               </div>
 
               <div className="space-y-3 pt-2">
@@ -1134,7 +1191,7 @@
 
       return (
         <div className="min-h-screen flex flex-col transition-colors duration-200">
-          {/* Top Header - Updated title to "Apex PPM" */}
+          {/* Top Header */}
           <header className="border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-[#111827] px-4 md:px-6 py-3 flex items-center justify-between gap-4 shadow-sm no-print">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-2xl bg-[#0b1120] border border-slate-800 flex items-center justify-center p-1.5 shadow-md">
@@ -1182,14 +1239,7 @@
               </select>
 
               <button
-                onClick={() => {
-                  setManageAction("create");
-                  setManageType("project");
-                  setEditCode(`PRJ-0${data.projects.length + 1}`);
-                  setEditName("");
-                  setEditParentPgmId(selectedProgramId !== "ALL" ? selectedProgramId : data.programs[0]?.id);
-                  setShowManageModal(true);
-                }}
+                onClick={openManageModal}
                 className="bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-700 text-xs font-semibold px-3 py-1.5 rounded-lg transition"
               >
                 ⚙️ Manage
@@ -1281,18 +1331,20 @@
                 ))}
               </div>
 
+              {/* Statutory Holidays Region Selector (CA, US, Both) */}
               <div className="p-3 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 space-y-2">
                 <div className="text-[11px] font-semibold text-slate-700 dark:text-slate-300">Statutory Calendar</div>
-                <div className="flex items-center justify-between text-[10px] text-slate-500">
-                  <span>Alberta / Canadian Stats</span>
-                  <input
-                    type="checkbox"
-                    checked={showHolidays}
-                    onChange={(e) => setShowHolidays(e.target.checked)}
-                    className="accent-brand-emerald"
-                  />
-                </div>
-                <div className="text-[9px] text-slate-400">Highlights holiday milestones & non-working dates in Gantt.</div>
+                <select
+                  value={holidayRegion}
+                  onChange={(e) => setHolidayRegion(e.target.value)}
+                  className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-2 py-1.5 text-xs text-slate-800 dark:text-slate-200"
+                >
+                  <option value="CA_AB">🇨🇦 Canadian / Alberta</option>
+                  <option value="US">🇺🇸 US Federal</option>
+                  <option value="BOTH">🌎 Cross-Border (CA + US)</option>
+                  <option value="NONE">Off / Hide Holidays</option>
+                </select>
+                <div className="text-[9px] text-slate-400">Highlights stat holidays in yellow/amber on the timeline.</div>
               </div>
             </aside>
 
@@ -1326,7 +1378,7 @@
                       type="text"
                       value={qaWbs}
                       onChange={(e) => setQaWbs(e.target.value)}
-                      placeholder={`${activeProjectIndex}.${visibleTasks.length + 1}`}
+                      placeholder="Auto"
                       className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-2 py-1.5 text-xs text-slate-900 dark:text-white"
                     />
                   </div>
@@ -1336,7 +1388,7 @@
                       type="text"
                       value={qaName}
                       onChange={(e) => setQaName(e.target.value)}
-                      placeholder={qaType === "Summary" ? "e.g. 1.0 Proposal Creation & Submission" : qaType === "Milestone" ? "Stage Gate / Review Signoff..." : "Deliverable description..."}
+                      placeholder={qaType === "Summary" ? "e.g. 1.0 Proposal Creation" : qaType === "Milestone" ? "Stage Gate / Review Signoff..." : "Deliverable description..."}
                       className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-900 dark:text-white"
                     />
                   </div>
@@ -1396,24 +1448,24 @@
                 </form>
               )}
 
-              {/* CARD 1: Deliverables Table Grid with Distinct Project Badges & Descriptions */}
+              {/* CARD 1: Deliverables Table Grid Grouped Cleanly by Projects */}
               {activeTab === "gantt" && (
                 <div className="bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-sm">
                   <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-800 flex justify-between items-center bg-slate-50/50 dark:bg-slate-900/50">
                     <h3 className="font-bold text-xs uppercase tracking-wider text-slate-700 dark:text-slate-300">
-                      Deliverables, WBS & Cross-Project Dependencies
+                      Deliverables, WBS & Cross-Project Dependencies (Organized by Project Track)
                     </h3>
                     <div className="text-[11px] text-slate-500">
-                      {cpmSchedule.tasks.length} items • Reorder with ▲ / ▼ • Click 📝 for Scope Description
+                      {cpmSchedule.tasks.length} items total • Grouped by Project • Click 📝 for Scope Details
                     </div>
                   </div>
+
                   <div className="overflow-x-auto">
                     <table className="w-full border-collapse text-left text-xs">
                       <thead>
                         <tr className="border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/90 text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
                           <th className="w-12 px-2 py-3 text-center border-r border-slate-200 dark:border-slate-800">ORDER</th>
                           <th className="w-10 px-2 py-3 text-center border-r border-slate-200 dark:border-slate-800">DONE</th>
-                          <th className="w-16 px-2 py-3 border-r border-slate-200 dark:border-slate-800">PROJECT</th>
                           <th className="w-16 px-2 py-3 border-r border-slate-200 dark:border-slate-800">WBS</th>
                           <th className="w-24 px-2 py-3 border-r border-slate-200 dark:border-slate-800">TYPE</th>
                           <th className="min-w-[200px] px-3 py-3 border-r border-slate-200 dark:border-slate-800">DELIVERABLE</th>
@@ -1428,186 +1480,196 @@
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
-                        {cpmSchedule.tasks.length === 0 ? (
+                        {groupedVisibleTasks.length === 0 ? (
                           <tr>
-                            <td colSpan="14" className="text-center py-8 text-slate-400 text-xs">
+                            <td colSpan="13" className="text-center py-8 text-slate-400 text-xs">
                               No deliverables found. Add a deliverable or milestone above!
                             </td>
                           </tr>
                         ) : (
-                          cpmSchedule.tasks.map((t, idx) => {
-                            const taskPrj = data.projects.find(p => p.id === t.projectId);
-                            const isSummary = t.itemType === "Summary";
-                            return (
-                              <tr key={t.id} className={`hover:bg-slate-50 dark:hover:bg-slate-800/40 ${isSummary ? 'bg-slate-100/60 dark:bg-slate-800/60 font-semibold' : ''}`}>
-                                <td className="px-1 py-2 text-center border-r border-slate-200 dark:border-slate-800">
-                                  <div className="flex items-center justify-center gap-0.5">
-                                    <button
-                                      onClick={() => moveTaskOrder(t.id, "up")}
-                                      disabled={idx === 0}
-                                      className="p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-30 text-[10px]"
-                                      title="Move Up"
-                                    >
-                                      ▲
-                                    </button>
-                                    <button
-                                      onClick={() => moveTaskOrder(t.id, "down")}
-                                      disabled={idx === cpmSchedule.tasks.length - 1}
-                                      className="p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-30 text-[10px]"
-                                      title="Move Down"
-                                    >
-                                      ▼
-                                    </button>
+                          groupedVisibleTasks.map((group) => (
+                            <React.Fragment key={group.project.id}>
+                              {/* DISTINCT PROJECT SECTION HEADER BANNER */}
+                              <tr className="bg-slate-100/90 dark:bg-slate-800/90 border-t-2 border-b border-slate-300 dark:border-slate-700">
+                                <td colSpan="13" className="px-4 py-2">
+                                  <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-2">
+                                      <span className="w-2.5 h-2.5 rounded-full bg-brand-emerald"></span>
+                                      <span className="font-bold font-mono text-brand-emerald text-xs">{group.project.code}:</span>
+                                      <span className="font-bold text-slate-900 dark:text-white text-xs">{group.project.name}</span>
+                                      <span className="text-[10px] text-slate-500 font-mono">({group.tasks.length} deliverables)</span>
+                                    </div>
+                                    <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
+                                      Methodology: {group.project.methodology || 'Hybrid Agile'}
+                                    </span>
                                   </div>
-                                </td>
-
-                                <td className="px-2 py-2 text-center border-r border-slate-200 dark:border-slate-800">
-                                  <input
-                                    type="checkbox"
-                                    checked={!!t.done}
-                                    onChange={(e) => updateTaskField(t.id, "done", e.target.checked)}
-                                    className="w-4 h-4 rounded accent-brand-emerald cursor-pointer"
-                                  />
-                                </td>
-
-                                {/* Project Tag Badge */}
-                                <td className="px-2 py-2 border-r border-slate-200 dark:border-slate-800 font-mono text-[10px]">
-                                  <span className="px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold">
-                                    {taskPrj?.code || "PRJ"}
-                                  </span>
-                                </td>
-
-                                <td className="px-2 py-2 border-r border-slate-200 dark:border-slate-800 font-mono text-[11px]">
-                                  <input
-                                    type="text"
-                                    value={t.wbs}
-                                    onChange={(e) => updateTaskField(t.id, "wbs", e.target.value)}
-                                    className="w-12 bg-transparent border-b border-transparent hover:border-slate-400 focus:border-brand-emerald outline-none"
-                                  />
-                                </td>
-
-                                <td className="px-2 py-1.5 border-r border-slate-200 dark:border-slate-800">
-                                  <select
-                                    value={t.itemType || "Task"}
-                                    onChange={(e) => updateTaskField(t.id, "itemType", e.target.value)}
-                                    className="bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded px-1.5 py-0.5 text-[10px] font-semibold"
-                                  >
-                                    <option value="Task">Task</option>
-                                    <option value="Summary">Summary</option>
-                                    <option value="Milestone">◆ Milestone</option>
-                                  </select>
-                                </td>
-
-                                <td className="px-3 py-2 border-r border-slate-200 dark:border-slate-800 font-medium text-slate-900 dark:text-white">
-                                  {t.itemType === "Milestone" && <span className="text-brand-emerald mr-1.5">◆</span>}
-                                  {isSummary && <span className="text-indigo-400 mr-1.5 font-bold">📂</span>}
-                                  {t.name}
-                                </td>
-
-                                {/* Description / Scope Trigger */}
-                                <td className="px-1 py-1.5 text-center border-r border-slate-200 dark:border-slate-800">
-                                  <button
-                                    onClick={() => setDescModalTask(t)}
-                                    className={`px-1.5 py-0.5 rounded text-[10px] font-medium transition ${t.description ? 'bg-brand-emerald/10 text-brand-emerald border border-brand-emerald/30 font-bold' : 'text-slate-400 hover:text-slate-200'}`}
-                                    title="View & Edit Task Description & AI Agent Prompt"
-                                  >
-                                    {t.description ? '📝 Edit' : '+ Scope'}
-                                  </button>
-                                </td>
-
-                                {/* Multi-Predecessor Tags & Management */}
-                                <td className="px-2 py-1.5 border-r border-slate-200 dark:border-slate-800">
-                                  <div className="flex flex-wrap items-center gap-1">
-                                    {(t.predecessors || []).map((pRef, pIdx) => {
-                                      const pTask = cpmSchedule.rawMap[pRef.id];
-                                      return (
-                                        <span key={pIdx} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-[10px] font-mono">
-                                          <span>{pTask ? pTask.wbs : "?"}{pRef.type}</span>
-                                          <button
-                                            onClick={() => removePredecessor(t.id, pRef.id)}
-                                            className="text-slate-400 hover:text-rose-500"
-                                          >
-                                            ×
-                                          </button>
-                                        </span>
-                                      );
-                                    })}
-                                    <button
-                                      onClick={() => setMultiDepModalTask(t)}
-                                      className="px-1.5 py-0.5 rounded border border-dashed border-slate-300 dark:border-slate-700 text-slate-500 hover:text-brand-emerald text-[10px] font-semibold"
-                                    >
-                                      + Link
-                                    </button>
-                                  </div>
-                                </td>
-
-                                <td className="px-1.5 py-1.5 border-r border-slate-200 dark:border-slate-800">
-                                  <input
-                                    type="date"
-                                    value={t.esDate}
-                                    disabled={isSummary}
-                                    onChange={(e) => updateTaskField(t.id, "startDate", e.target.value)}
-                                    className="bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded px-1.5 py-0.5 text-[11px] disabled:opacity-50"
-                                  />
-                                </td>
-                                <td className="px-1.5 py-1.5 border-r border-slate-200 dark:border-slate-800">
-                                  <input
-                                    type="date"
-                                    value={t.efDate}
-                                    disabled={t.itemType === "Milestone" || isSummary}
-                                    onChange={(e) => updateTaskField(t.id, "endDate", e.target.value)}
-                                    className="bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded px-1.5 py-0.5 text-[11px] disabled:opacity-50"
-                                  />
-                                </td>
-
-                                <td className="px-1 py-1.5 text-center border-r border-slate-200 dark:border-slate-800">
-                                  <input
-                                    type="number"
-                                    step="any"
-                                    min="0"
-                                    disabled={isSummary}
-                                    value={t.itemType === "Milestone" ? 0 : t.duration}
-                                    onChange={(e) => updateTaskField(t.id, "duration", e.target.value)}
-                                    className="w-16 bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded px-1.5 py-0.5 text-center font-mono text-xs disabled:opacity-50"
-                                  />
-                                </td>
-
-                                {/* Multi-Resource Assignment Trigger with AI Agent Badging */}
-                                <td className="px-2 py-1.5 border-r border-slate-200 dark:border-slate-800">
-                                  <div className="flex flex-wrap items-center gap-1">
-                                    {(t.assignments || []).map((asgn, aIdx) => {
-                                      const isAg = data.resources?.find(r => r.name === asgn.name)?.isAgent;
-                                      return (
-                                        <span key={aIdx} className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium border ${isAg ? 'bg-purple-500/10 text-purple-400 border-purple-500/30' : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'}`}>
-                                          <span>{isAg ? "🤖 " : ""}{asgn.name.split(" ")[0]} ({asgn.allocation}%)</span>
-                                        </span>
-                                      );
-                                    })}
-                                    <button
-                                      onClick={() => setAssignModalTask(t)}
-                                      className="px-1.5 py-0.5 rounded border border-dashed border-slate-300 dark:border-slate-700 text-slate-500 hover:text-brand-emerald text-[10px]"
-                                      title="Edit Resource Assignments"
-                                    >
-                                      ⚙️ Assign
-                                    </button>
-                                  </div>
-                                </td>
-
-                                <td className="px-1 py-2 text-center border-r border-slate-200 dark:border-slate-800 font-mono text-[11px]">
-                                  {t.isCritical ? <span className="text-rose-500 font-bold">0d (CP)</span> : isSummary ? <span className="text-slate-400">—</span> : <span className="text-emerald-500">+{t.float}d</span>}
-                                </td>
-
-                                <td className="px-1 py-2 text-center">
-                                  <button
-                                    onClick={() => deleteTask(t.id)}
-                                    className="text-slate-400 hover:text-rose-500 font-bold px-1"
-                                  >
-                                    ✕
-                                  </button>
                                 </td>
                               </tr>
-                            );
-                          })
+
+                              {group.tasks.map((t, idx) => {
+                                const isSummary = t.itemType === "Summary";
+                                return (
+                                  <tr key={t.id} className={`hover:bg-slate-50 dark:hover:bg-slate-800/40 ${isSummary ? 'bg-slate-100/60 dark:bg-slate-800/60 font-semibold' : ''}`}>
+                                    <td className="px-1 py-2 text-center border-r border-slate-200 dark:border-slate-800">
+                                      <div className="flex items-center justify-center gap-0.5">
+                                        <button
+                                          onClick={() => moveTaskOrder(t.id, "up")}
+                                          disabled={idx === 0}
+                                          className="p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-30 text-[10px]"
+                                          title="Move Up"
+                                        >
+                                          ▲
+                                        </button>
+                                        <button
+                                          onClick={() => moveTaskOrder(t.id, "down")}
+                                          disabled={idx === group.tasks.length - 1}
+                                          className="p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-30 text-[10px]"
+                                          title="Move Down"
+                                        >
+                                          ▼
+                                        </button>
+                                      </div>
+                                    </td>
+
+                                    <td className="px-2 py-2 text-center border-r border-slate-200 dark:border-slate-800">
+                                      <input
+                                        type="checkbox"
+                                        checked={!!t.done}
+                                        onChange={(e) => updateTaskField(t.id, "done", e.target.checked)}
+                                        className="w-4 h-4 rounded accent-brand-emerald cursor-pointer"
+                                      />
+                                    </td>
+
+                                    <td className="px-2 py-2 border-r border-slate-200 dark:border-slate-800 font-mono text-[11px]">
+                                      <input
+                                        type="text"
+                                        value={t.wbs}
+                                        onChange={(e) => updateTaskField(t.id, "wbs", e.target.value)}
+                                        className="w-12 bg-transparent border-b border-transparent hover:border-slate-400 focus:border-brand-emerald outline-none font-bold text-slate-800 dark:text-slate-200"
+                                      />
+                                    </td>
+
+                                    <td className="px-2 py-1.5 border-r border-slate-200 dark:border-slate-800">
+                                      <select
+                                        value={t.itemType || "Task"}
+                                        onChange={(e) => updateTaskField(t.id, "itemType", e.target.value)}
+                                        className="bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded px-1.5 py-0.5 text-[10px] font-semibold"
+                                      >
+                                        <option value="Task">Task</option>
+                                        <option value="Summary">Summary</option>
+                                        <option value="Milestone">◆ Milestone</option>
+                                      </select>
+                                    </td>
+
+                                    <td className="px-3 py-2 border-r border-slate-200 dark:border-slate-800 font-medium text-slate-900 dark:text-white">
+                                      {t.itemType === "Milestone" && <span className="text-brand-emerald mr-1.5">◆</span>}
+                                      {isSummary && <span className="text-indigo-400 mr-1.5 font-bold">📂</span>}
+                                      {t.name}
+                                    </td>
+
+                                    <td className="px-1 py-1.5 text-center border-r border-slate-200 dark:border-slate-800">
+                                      <button
+                                        onClick={() => setDescModalTask(t)}
+                                        className={`px-1.5 py-0.5 rounded text-[10px] font-medium transition ${t.description ? 'bg-brand-emerald/10 text-brand-emerald border border-brand-emerald/30 font-bold' : 'text-slate-400 hover:text-slate-200'}`}
+                                        title="View & Edit Task Description & AI Agent Prompt"
+                                      >
+                                        {t.description ? '📝 Edit' : '+ Scope'}
+                                      </button>
+                                    </td>
+
+                                    <td className="px-2 py-1.5 border-r border-slate-200 dark:border-slate-800">
+                                      <div className="flex flex-wrap items-center gap-1">
+                                        {(t.predecessors || []).map((pRef, pIdx) => {
+                                          const pTask = cpmSchedule.rawMap[pRef.id];
+                                          return (
+                                            <span key={pIdx} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-[10px] font-mono">
+                                              <span>{pTask ? pTask.wbs : "?"}{pRef.type}</span>
+                                              <button
+                                                onClick={() => removePredecessor(t.id, pRef.id)}
+                                                className="text-slate-400 hover:text-rose-500"
+                                              >
+                                                ×
+                                              </button>
+                                            </span>
+                                          );
+                                        })}
+                                        <button
+                                          onClick={() => setMultiDepModalTask(t)}
+                                          className="px-1.5 py-0.5 rounded border border-dashed border-slate-300 dark:border-slate-700 text-slate-500 hover:text-brand-emerald text-[10px] font-semibold"
+                                        >
+                                          + Link
+                                        </button>
+                                      </div>
+                                    </td>
+
+                                    <td className="px-1.5 py-1.5 border-r border-slate-200 dark:border-slate-800">
+                                      <input
+                                        type="date"
+                                        value={t.esDate}
+                                        disabled={isSummary}
+                                        onChange={(e) => updateTaskField(t.id, "startDate", e.target.value)}
+                                        className="bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded px-1.5 py-0.5 text-[11px] disabled:opacity-50"
+                                      />
+                                    </td>
+                                    <td className="px-1.5 py-1.5 border-r border-slate-200 dark:border-slate-800">
+                                      <input
+                                        type="date"
+                                        value={t.efDate}
+                                        disabled={t.itemType === "Milestone" || isSummary}
+                                        onChange={(e) => updateTaskField(t.id, "endDate", e.target.value)}
+                                        className="bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded px-1.5 py-0.5 text-[11px] disabled:opacity-50"
+                                      />
+                                    </td>
+
+                                    <td className="px-1 py-1.5 text-center border-r border-slate-200 dark:border-slate-800">
+                                      <input
+                                        type="number"
+                                        step="any"
+                                        min="0"
+                                        disabled={isSummary}
+                                        value={t.itemType === "Milestone" ? 0 : t.duration}
+                                        onChange={(e) => updateTaskField(t.id, "duration", e.target.value)}
+                                        className="w-16 bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded px-1.5 py-0.5 text-center font-mono text-xs disabled:opacity-50"
+                                      />
+                                    </td>
+
+                                    <td className="px-2 py-1.5 border-r border-slate-200 dark:border-slate-800">
+                                      <div className="flex flex-wrap items-center gap-1">
+                                        {(t.assignments || []).map((asgn, aIdx) => {
+                                          const isAg = data.resources?.find(r => r.name === asgn.name)?.isAgent;
+                                          return (
+                                            <span key={aIdx} className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium border ${isAg ? 'bg-purple-500/10 text-purple-400 border-purple-500/30' : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'}`}>
+                                              <span>{isAg ? "🤖 " : ""}{asgn.name.split(" ")[0]} ({asgn.allocation}%)</span>
+                                            </span>
+                                          );
+                                        })}
+                                        <button
+                                          onClick={() => setAssignModalTask(t)}
+                                          className="px-1.5 py-0.5 rounded border border-dashed border-slate-300 dark:border-slate-700 text-slate-500 hover:text-brand-emerald text-[10px]"
+                                          title="Edit Resource Assignments"
+                                        >
+                                          ⚙️ Assign
+                                        </button>
+                                      </div>
+                                    </td>
+
+                                    <td className="px-1 py-2 text-center border-r border-slate-200 dark:border-slate-800 font-mono text-[11px]">
+                                      {t.isCritical ? <span className="text-rose-500 font-bold">0d (CP)</span> : isSummary ? <span className="text-slate-400">—</span> : <span className="text-emerald-500">+{t.float}d</span>}
+                                    </td>
+
+                                    <td className="px-1 py-2 text-center">
+                                      <button
+                                        onClick={() => deleteTask(t.id)}
+                                        className="text-slate-400 hover:text-rose-500 font-bold px-1"
+                                      >
+                                        ✕
+                                      </button>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </React.Fragment>
+                          ))
                         )}
                       </tbody>
                     </table>
@@ -1615,7 +1677,7 @@
                 </div>
               )}
 
-              {/* CARD 2: Dedicated Full-Width Gantt Chart with SVG Arrows & Hammock Summary Bars */}
+              {/* CARD 2: Dedicated Full-Width Gantt Chart with SVG Arrows & Grouped Project Tracks */}
               {activeTab === "gantt" && (
                 <div className="bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-sm">
                   <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-800 flex flex-wrap justify-between items-center gap-3 bg-slate-50/50 dark:bg-slate-900/50">
@@ -1624,7 +1686,7 @@
                         Interactive Gantt Timeline & Dependency Network
                       </h3>
                       <div className="text-[11px] text-slate-500">
-                        {selectedProjectId === "ALL" ? "Program Portfolio Multi-Project Rollup" : "Project Critical Path Timeline"}
+                        {selectedProjectId === "ALL" ? "Multi-Project Grouped Timeline" : "Project Critical Path Timeline"}
                       </div>
                     </div>
 
@@ -1648,21 +1710,23 @@
                         <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded bg-brand-emerald"></span> Standard</span>
                         <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded bg-slate-600 border border-slate-400"></span> Summary</span>
                         <span className="flex items-center gap-1.5"><span className="text-brand-emerald font-bold">◆</span> Milestone</span>
-                        <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded bg-amber-400"></span> Stat Holiday</span>
+                        {holidayRegion !== "NONE" && (
+                          <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded bg-amber-400"></span> Stat Holiday</span>
+                        )}
                       </div>
                     </div>
                   </div>
 
                   <div className="overflow-x-auto relative p-4">
-                    <div style={{ width: `${Math.max(900, cpmSchedule.totalSpanDays * pxPerDay + 240)}px` }} className="relative select-none">
+                    <div style={{ width: `${Math.max(900, cpmSchedule.totalSpanDays * pxPerDay + 260)}px` }} className="relative select-none">
                       {/* Timeline Header */}
-                      <div className="flex border-b border-slate-200 dark:border-slate-800 pb-2 mb-2 pl-[240px]">
+                      <div className="flex border-b border-slate-200 dark:border-slate-800 pb-2 mb-2 pl-[260px]">
                         {timelineUnits.map((u) => (
                           <div
                             key={u.key}
                             style={{ width: `${u.widthPx}px` }}
                             className={`shrink-0 text-center py-1 border-r border-slate-200 dark:border-slate-800/60 ${
-                              u.isHoliday && showHolidays ? "bg-amber-400/20 text-amber-500 dark:text-amber-400 font-bold border-b-2 border-amber-400" : ""
+                              u.isHoliday ? "bg-amber-400/20 text-amber-500 dark:text-amber-400 font-bold border-b-2 border-amber-400" : ""
                             }`}
                             title={u.holidayName ? `Stat Holiday: ${u.holidayName}` : ""}
                           >
@@ -1676,7 +1740,7 @@
                       <svg
                         className="absolute inset-0 pointer-events-none"
                         style={{
-                          width: `${cpmSchedule.totalSpanDays * pxPerDay + 240}px`,
+                          width: `${cpmSchedule.totalSpanDays * pxPerDay + 260}px`,
                           height: `${cpmSchedule.tasks.length * 40 + 50}px`
                         }}
                       >
@@ -1700,17 +1764,17 @@
 
                             let pX, sX;
                             if (dep === "FS") {
-                              pX = 240 + (pred.itemType === "Milestone" ? pred.es * pxPerDay : pred.ef * pxPerDay);
-                              sX = 240 + succ.es * pxPerDay;
+                              pX = 260 + (pred.itemType === "Milestone" ? pred.es * pxPerDay : pred.ef * pxPerDay);
+                              sX = 260 + succ.es * pxPerDay;
                             } else if (dep === "SS") {
-                              pX = 240 + pred.es * pxPerDay;
-                              sX = 240 + succ.es * pxPerDay;
+                              pX = 260 + pred.es * pxPerDay;
+                              sX = 260 + succ.es * pxPerDay;
                             } else if (dep === "FF") {
-                              pX = 240 + (pred.itemType === "Milestone" ? pred.es * pxPerDay : pred.ef * pxPerDay);
-                              sX = 240 + (succ.itemType === "Milestone" ? succ.es * pxPerDay : succ.ef * pxPerDay);
+                              pX = 260 + (pred.itemType === "Milestone" ? pred.es * pxPerDay : pred.ef * pxPerDay);
+                              sX = 260 + (succ.itemType === "Milestone" ? succ.es * pxPerDay : succ.ef * pxPerDay);
                             } else {
-                              pX = 240 + pred.es * pxPerDay;
-                              sX = 240 + (succ.itemType === "Milestone" ? succ.es * pxPerDay : succ.ef * pxPerDay);
+                              pX = 260 + pred.es * pxPerDay;
+                              sX = 260 + (succ.itemType === "Milestone" ? succ.es * pxPerDay : succ.ef * pxPerDay);
                             }
 
                             let pathD = "";
@@ -1744,7 +1808,7 @@
                       {/* Deliverable Gantt Rows */}
                       <div className="space-y-2">
                         {cpmSchedule.tasks.map((t) => {
-                          const leftPos = 240 + t.es * pxPerDay;
+                          const leftPos = 260 + t.es * pxPerDay;
                           const widthPx = Math.max(16, (t.itemType === "Milestone" ? 0 : t.duration) * pxPerDay - 4);
                           const isMilestone = t.itemType === "Milestone";
                           const isSummary = t.itemType === "Summary";
@@ -1752,9 +1816,11 @@
 
                           return (
                             <div key={t.id} className="flex items-center h-8 relative hover:bg-slate-50 dark:hover:bg-slate-800/30 rounded">
-                              <div className="w-[240px] shrink-0 pr-3 truncate text-xs font-medium text-slate-700 dark:text-slate-300 flex items-center justify-between">
+                              <div className="w-[260px] shrink-0 pr-3 truncate text-xs font-medium text-slate-700 dark:text-slate-300 flex items-center justify-between">
                                 <span className="truncate">
-                                  <span className="font-mono text-[10px] text-slate-400 mr-1">[{taskPrj?.code || 'PRJ'}]</span>
+                                  <span className="font-mono text-[9px] px-1 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 mr-1.5 font-bold">
+                                    {taskPrj?.code || 'PRJ'}
+                                  </span>
                                   {t.wbs} {t.name}
                                 </span>
                                 <span className="text-[10px] text-slate-400 font-mono ml-1">{isMilestone ? "0d" : `${t.duration}d`}</span>
@@ -1771,7 +1837,6 @@
                                   <div className="w-1.5 h-1.5 bg-white rounded-full -rotate-45" />
                                 </div>
                               ) : isSummary ? (
-                                /* Hammock bracket style for Summary Task */
                                 <div
                                   style={{ left: `${leftPos}px`, width: `${widthPx}px` }}
                                   className="absolute h-3 bg-slate-700 border-t-2 border-b-2 border-slate-400 rounded-sm z-10"
@@ -1804,7 +1869,7 @@
                 </div>
               )}
 
-              {/* Resource Loading & Over-Allocation Heatmap Dashboard */}
+              {/* Resource Loading Heatmap Dashboard */}
               {activeTab === "loading" && (
                 <div className="space-y-4">
                   <div className="bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-sm">
@@ -2170,7 +2235,7 @@
             </main>
           </div>
 
-          {/* Task Scope & Description Modal (AI Agent Prompt & Work Log) */}
+          {/* Task Scope & Description Modal */}
           {descModalTask && (
             <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
               <div className="bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-800 rounded-3xl p-6 w-full max-w-lg space-y-4 shadow-2xl">
@@ -2393,7 +2458,7 @@
             </div>
           )}
 
-          {/* Manage Modal (Programs, Projects, Team Access, AI Resources) */}
+          {/* Manage Modal with Explicit Project & Program Selectors for Editing */}
           {showManageModal && (
             <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
               <div className="bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-800 rounded-3xl p-6 w-full max-w-xl space-y-4 shadow-2xl">
@@ -2407,7 +2472,11 @@
                 <div className="grid grid-cols-3 gap-2 p-1 bg-slate-100 dark:bg-slate-800/80 rounded-2xl text-xs font-bold">
                   <button
                     type="button"
-                    onClick={() => { setManageAction("create"); }}
+                    onClick={() => {
+                      setManageAction("create");
+                      setEditCode(manageType === "program" ? `PGM-0${data.programs.length + 1}` : `PRJ-0${data.projects.length + 1}`);
+                      setEditName("");
+                    }}
                     className={`py-1.5 rounded-xl transition ${manageAction === "create" ? "bg-brand-emerald text-brand-navy shadow-sm" : "text-slate-500"}`}
                   >
                     + Create / Invite
@@ -2416,20 +2485,8 @@
                     type="button"
                     onClick={() => {
                       setManageAction("edit");
-                      if (manageType === "program") {
-                        const target = data.programs.find(p => p.id === selectedProgramId) || data.programs[0];
-                        setTargetEntityId(target.id);
-                        setEditCode(target.code);
-                        setEditName(target.name);
-                        setEditManager(target.manager);
-                        setEditBudget(target.budget);
-                      } else {
-                        const target = data.projects.find(p => p.id === selectedProjectId) || data.projects[0];
-                        setTargetEntityId(target.id);
-                        setEditCode(target.code);
-                        setEditName(target.name);
-                        setEditMethodology(target.methodology);
-                      }
+                      if (manageType === "project") loadProjectForEdit(selectedEditProjectId || data.projects[0]?.id);
+                      else if (manageType === "program") loadProgramForEdit(selectedEditProgramId || data.programs[0]?.id);
                     }}
                     className={`py-1.5 rounded-xl transition ${manageAction === "edit" ? "bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm" : "text-slate-500"}`}
                   >
@@ -2448,17 +2505,25 @@
                   <div className="flex gap-2">
                     <button
                       type="button"
-                      onClick={() => { setManageType("program"); setEditCode(`PGM-0${data.programs.length + 1}`); }}
-                      className={`flex-1 py-1.5 rounded-xl text-xs font-bold transition ${manageType === "program" ? "bg-slate-200 dark:bg-slate-700 text-slate-900 dark:text-white" : "text-slate-400"}`}
-                    >
-                      Program
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => { setManageType("project"); setEditCode(`PRJ-0${data.projects.length + 1}`); }}
+                      onClick={() => {
+                        setManageType("project");
+                        if (manageAction === "edit") loadProjectForEdit(selectedEditProjectId || data.projects[0]?.id);
+                        else setEditCode(`PRJ-0${data.projects.length + 1}`);
+                      }}
                       className={`flex-1 py-1.5 rounded-xl text-xs font-bold transition ${manageType === "project" ? "bg-slate-200 dark:bg-slate-700 text-slate-900 dark:text-white" : "text-slate-400"}`}
                     >
                       Project
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setManageType("program");
+                        if (manageAction === "edit") loadProgramForEdit(selectedEditProgramId || data.programs[0]?.id);
+                        else setEditCode(`PGM-0${data.programs.length + 1}`);
+                      }}
+                      className={`flex-1 py-1.5 rounded-xl text-xs font-bold transition ${manageType === "program" ? "bg-slate-200 dark:bg-slate-700 text-slate-900 dark:text-white" : "text-slate-400"}`}
+                    >
+                      Program
                     </button>
                     <button
                       type="button"
@@ -2479,6 +2544,37 @@
 
                 {manageAction !== "list" ? (
                   <form onSubmit={handleProgramProjectSubmit} className="space-y-3 pt-1">
+                    {/* Explicit Selector when in Edit Active mode so you can pick PRJ-01, PRJ-02, etc. */}
+                    {manageAction === "edit" && manageType === "project" && (
+                      <div>
+                        <label className="block text-[10px] font-bold uppercase text-brand-emerald mb-1">Select Project to Edit</label>
+                        <select
+                          value={selectedEditProjectId}
+                          onChange={(e) => loadProjectForEdit(e.target.value)}
+                          className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-xs font-semibold text-slate-900 dark:text-white"
+                        >
+                          {data.projects.map(p => (
+                            <option key={p.id} value={p.id}>{p.code}: {p.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+
+                    {manageAction === "edit" && manageType === "program" && (
+                      <div>
+                        <label className="block text-[10px] font-bold uppercase text-brand-emerald mb-1">Select Program to Edit</label>
+                        <select
+                          value={selectedEditProgramId}
+                          onChange={(e) => loadProgramForEdit(e.target.value)}
+                          className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-xs font-semibold text-slate-900 dark:text-white"
+                        >
+                          {data.programs.map(p => (
+                            <option key={p.id} value={p.id}>{p.code}: {p.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+
                     {manageType === "team" ? (
                       <div className="space-y-3">
                         <div>
@@ -2538,7 +2634,7 @@
                             className="accent-brand-emerald"
                           />
                           <label htmlFor="isAgentCheck" className="text-xs text-slate-300 font-medium">
-                            Register as an <strong>Autonomous AI Agent</strong> (Enables API task pickup & completion)
+                            Register as an <strong>Autonomous AI Agent</strong>
                           </label>
                         </div>
                       </div>
@@ -2565,7 +2661,6 @@
                             type="text"
                             value={editCode}
                             onChange={(e) => setEditCode(e.target.value)}
-                            placeholder={manageType === "program" ? "PGM-02" : "PRJ-02"}
                             className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-xs font-mono"
                           />
                         </div>
@@ -2576,7 +2671,6 @@
                             type="text"
                             value={editName}
                             onChange={(e) => setEditName(e.target.value)}
-                            placeholder="e.g. Infrastructure Modernization"
                             className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-xs"
                           />
                         </div>
@@ -2609,7 +2703,6 @@
                               type="text"
                               value={editMethodology}
                               onChange={(e) => setEditMethodology(e.target.value)}
-                              placeholder="Hybrid Agile, Critical Path, Waterfall"
                               className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-xs"
                             />
                           </div>
@@ -2628,26 +2721,54 @@
                   </form>
                 ) : (
                   <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-1">
-                    {/* Team Members & Permission Management */}
                     <div>
-                      <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">Workspace Team Members & RBAC</h4>
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">Projects</h4>
                       <div className="space-y-1.5">
-                        {(data.teamMembers || []).map(member => (
-                          <div key={member.id} className="flex items-center justify-between p-2.5 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 text-xs">
+                        {data.projects.map(prj => (
+                          <div key={prj.id} className="flex items-center justify-between p-2.5 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 text-xs">
                             <div>
-                              <div className="font-bold text-slate-900 dark:text-white">{member.email}</div>
-                              <div className="text-[10px] text-slate-500">Joined: {member.addedAt}</div>
+                              <span className="font-mono font-bold text-indigo-400">{prj.code}: </span>
+                              <span className="font-semibold">{prj.name}</span>
                             </div>
                             <div className="flex items-center gap-2">
-                              <select
-                                value={member.permission}
-                                onChange={(e) => updateTeamPermission(member.id, e.target.value)}
-                                className="bg-slate-200 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded px-2 py-0.5 text-[10px] font-semibold"
+                              <button
+                                onClick={() => {
+                                  setManageAction("edit");
+                                  setManageType("project");
+                                  loadProjectForEdit(prj.id);
+                                }}
+                                className="text-brand-emerald font-semibold hover:underline"
                               >
-                                <option value="Read-Write">Read-Write</option>
-                                <option value="Read-Only">Read-Only</option>
-                              </select>
-                              <button onClick={() => deleteTeamMember(member.id)} className="text-slate-400 hover:text-rose-500 font-bold px-1.5">✕</button>
+                                Edit
+                              </button>
+                              <button onClick={() => deleteProject(prj.id)} className="text-slate-400 hover:text-rose-500 font-bold px-2 py-1">✕</button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div>
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">Programs</h4>
+                      <div className="space-y-1.5">
+                        {data.programs.map(pgm => (
+                          <div key={pgm.id} className="flex items-center justify-between p-2.5 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 text-xs">
+                            <div>
+                              <span className="font-mono font-bold text-brand-emerald">{pgm.code}: </span>
+                              <span className="font-semibold">{pgm.name}</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => {
+                                  setManageAction("edit");
+                                  setManageType("program");
+                                  loadProgramForEdit(pgm.id);
+                                }}
+                                className="text-brand-emerald font-semibold hover:underline"
+                              >
+                                Edit
+                              </button>
+                              <button onClick={() => deleteProgram(pgm.id)} className="text-slate-400 hover:text-rose-500 font-bold px-2 py-1">✕</button>
                             </div>
                           </div>
                         ))}
@@ -2664,36 +2785,6 @@
                               <span className="text-[10px] text-slate-500 ml-2">({res.role})</span>
                             </div>
                             <button onClick={() => deleteResource(res.id)} className="text-slate-400 hover:text-rose-500 font-bold px-2 py-1">✕</button>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div>
-                      <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">Programs</h4>
-                      <div className="space-y-1.5">
-                        {data.programs.map(pgm => (
-                          <div key={pgm.id} className="flex items-center justify-between p-2.5 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 text-xs">
-                            <div>
-                              <span className="font-mono font-bold text-brand-emerald">{pgm.code}: </span>
-                              <span className="font-semibold">{pgm.name}</span>
-                            </div>
-                            <button onClick={() => deleteProgram(pgm.id)} className="text-slate-400 hover:text-rose-500 font-bold px-2 py-1">✕</button>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div>
-                      <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">Projects</h4>
-                      <div className="space-y-1.5">
-                        {data.projects.map(prj => (
-                          <div key={prj.id} className="flex items-center justify-between p-2.5 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 text-xs">
-                            <div>
-                              <span className="font-mono font-bold text-indigo-400">{prj.code}: </span>
-                              <span className="font-semibold">{prj.name}</span>
-                            </div>
-                            <button onClick={() => deleteProject(prj.id)} className="text-slate-400 hover:text-rose-500 font-bold px-2 py-1">✕</button>
                           </div>
                         ))}
                       </div>
