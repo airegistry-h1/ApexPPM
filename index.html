@@ -6,8 +6,8 @@
   <meta name="theme-color" content="#0b1120" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <meta name="apple-mobile-web-app-title" content="ApexPPM" />
-  <title>ApexPPM — Enterprise Portfolio & Program Manager</title>
+  <meta name="apple-mobile-web-app-title" content="Apex PPM" />
+  <title>Apex PPM — Enterprise Portfolio & Program Manager</title>
 
   <!-- External App Configuration -->
   <script src="config.js"></script>
@@ -28,8 +28,8 @@
       document.head.appendChild(linkIcon);
 
       const manifest = {
-        name: "ApexPPM Enterprise Cloud Manager",
-        short_name: "ApexPPM",
+        name: "Apex PPM Enterprise Cloud Manager",
+        short_name: "Apex PPM",
         start_url: window.location.pathname || "./index.html",
         display: "standalone",
         background_color: "#0b1120",
@@ -142,7 +142,6 @@
       return parseISO(isoStr).toLocaleDateString("en-US", { month: "short", day: "numeric" });
     };
 
-    // Generic, unbranded starter template for blank state initialization
     const INITIAL_EMPTY_WORKSPACE = {
       programs: [
         { id: "pgm-1", code: "PGM-01", name: "Main Program", manager: "Program Manager", budget: 100000 }
@@ -150,6 +149,7 @@
       projects: [
         { id: "prj-1", programId: "pgm-1", code: "PRJ-01", name: "Core Project", methodology: "Hybrid Agile", baselineStart: TODAY_ISO }
       ],
+      teamMembers: [],
       resources: [],
       tasks: [],
       risks: [],
@@ -217,10 +217,11 @@
       const [showReportModal, setShowReportModal] = useState(false);
       const [multiDepModalTask, setMultiDepModalTask] = useState(null);
       const [assignModalTask, setAssignModalTask] = useState(null);
+      const [descModalTask, setDescModalTask] = useState(null);
 
       // Management Form State
       const [manageAction, setManageAction] = useState("create");
-      const [manageType, setManageType] = useState("project");
+      const [manageType, setManageType] = useState("project"); // "program" | "project" | "resource" | "team"
       const [targetEntityId, setTargetEntityId] = useState("");
       const [editCode, setEditCode] = useState("");
       const [editName, setEditName] = useState("");
@@ -228,11 +229,16 @@
       const [editBudget, setEditBudget] = useState(100000);
       const [editMethodology, setEditMethodology] = useState("Hybrid Agile");
       const [editParentPgmId, setEditParentPgmId] = useState("");
+      
+      // Resource / Team Form State
       const [newResourceName, setNewResourceName] = useState("");
       const [newResourceRole, setNewResourceRole] = useState("Team Member");
+      const [newResourceIsAgent, setNewResourceIsAgent] = useState(false);
+      const [newMemberEmail, setNewMemberEmail] = useState("");
+      const [newMemberRole, setNewMemberRole] = useState("Editor"); // "Editor" (Read-Write) or "Viewer" (Read-Only)
 
       // Quick-Add Inputs
-      const [qaType, setQaType] = useState("Task");
+      const [qaType, setQaType] = useState("Task"); // "Task" | "Milestone" | "Summary"
       const [qaWbs, setQaWbs] = useState("");
       const [qaName, setQaName] = useState("");
       const [qaStartDate, setQaStartDate] = useState(TODAY_ISO);
@@ -240,12 +246,20 @@
       const [qaResource, setQaResource] = useState("");
       const [qaAllocation, setQaAllocation] = useState(100);
 
-      // Ensure quick-add default resource is synced with loaded resources
       useEffect(() => {
         if (!qaResource && data.resources && data.resources.length > 0) {
           setQaResource(data.resources[0].name);
         }
       }, [data.resources]);
+
+      // Calculate next suggested WBS based on project index
+      const activeProjectIndex = useMemo(() => {
+        if (selectedProjectId !== "ALL") {
+          const idx = data.projects.findIndex(p => p.id === selectedProjectId);
+          return idx >= 0 ? idx + 1 : 1;
+        }
+        return 1;
+      }, [selectedProjectId, data.projects]);
 
       // Risk Quick-Add State
       const [newRisk, setNewRisk] = useState({
@@ -303,11 +317,11 @@
           if (error) throw error;
 
           if (row && row.state && row.state.programs) {
-            // Existing user: Load their exact stored workspace
             const sanitizedState = {
               ...row.state,
               programs: row.state.programs || [],
               projects: row.state.projects || [],
+              teamMembers: row.state.teamMembers || [],
               resources: row.state.resources || [],
               risks: row.state.risks || [],
               procurements: row.state.procurements || [],
@@ -322,7 +336,8 @@
                 }
                 return {
                   ...t,
-                  itemType: isM ? "Milestone" : (t.itemType || "Task"),
+                  itemType: t.itemType || (isM ? "Milestone" : "Task"),
+                  description: t.description || "",
                   duration: Number(t.duration !== undefined ? t.duration : 1),
                   assignments: taskAssignments,
                   resource: taskAssignments[0]?.name || "Lead",
@@ -335,7 +350,6 @@
             setLastSyncedAt(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
             setSyncStatus("Cloud DB Synced");
           } else {
-            // Brand-new user: Seed with an isolated starter workspace tagged to their own handle
             const userHandle = activeUser.email ? activeUser.email.split("@")[0] : "Project Lead";
             const freshPgmId = "pgm-" + Date.now();
             const freshPrjId = "prj-" + (Date.now() + 1);
@@ -348,8 +362,12 @@
               projects: [
                 { id: freshPrjId, programId: freshPgmId, code: "PRJ-01", name: "Core Project", methodology: "Hybrid Agile", baselineStart: TODAY_ISO }
               ],
+              teamMembers: [
+                { id: "tm-1", email: activeUser.email, role: "Owner", permission: "Read-Write", addedAt: TODAY_ISO }
+              ],
               resources: [
-                { id: freshResId, name: userHandle, role: "Program Director / Lead" }
+                { id: freshResId, name: userHandle, role: "Program Director / Lead", isAgent: false },
+                { id: "res-agent-1", name: "Apex AI Agent", role: "Autonomous Automation Worker", isAgent: true }
               ],
               tasks: [],
               risks: [],
@@ -442,7 +460,7 @@
         });
       }, [data.tasks, selectedProjectId, selectedProgramId, programProjects]);
 
-      // Float / Decimal CPM Engine
+      // Float / Decimal CPM Engine with Hierarchical Summary Task Rollups
       const cpmSchedule = useMemo(() => {
         if (visibleTasks.length === 0) {
           return { tasks: [], anchorDate: TODAY_ISO, totalSpanDays: 30, criticalCount: 0, rawMap: {} };
@@ -454,7 +472,7 @@
           const dur = isMilestone ? 0 : Math.max(0.01, Number(t.duration || 1));
           taskMap[t.id] = {
             ...t,
-            itemType: isMilestone ? "Milestone" : (t.itemType || "Task"),
+            itemType: t.itemType || (isMilestone ? "Milestone" : "Task"),
             duration: dur,
             assignments: t.assignments || [{ name: t.resource || "Lead", allocation: Number(t.allocation || 100) }],
             predecessors: t.predecessors || (t.predecessorId ? [{ id: t.predecessorId, type: t.depType || "FS", lag: Number(t.lag || 0) }] : []),
@@ -463,14 +481,14 @@
           };
         });
 
-        // Forward Pass
+        // Forward Pass for standard tasks
         let changed = true;
         let passes = 0;
         while (changed && passes < 30) {
           changed = false;
           passes++;
           Object.values(taskMap).forEach(t => {
-            if (t.predecessors && t.predecessors.length > 0) {
+            if (t.itemType !== "Summary" && t.predecessors && t.predecessors.length > 0) {
               let latestReqStart = t.esDate;
               t.predecessors.forEach(predRef => {
                 const pred = taskMap[predRef.id];
@@ -495,6 +513,25 @@
             }
           });
         }
+
+        // Summary Task Rollups: Aggregates bounds of child tasks matching WBS prefix
+        Object.values(taskMap).forEach(summaryCandidate => {
+          if (summaryCandidate.itemType === "Summary") {
+            const prefix = summaryCandidate.wbs + ".";
+            const children = Object.values(taskMap).filter(c => c.wbs && c.wbs.startsWith(prefix) && c.id !== summaryCandidate.id);
+            if (children.length > 0) {
+              let minStart = children[0].esDate;
+              let maxEnd = children[0].efDate;
+              children.forEach(c => {
+                if (c.esDate < minStart) minStart = c.esDate;
+                if (c.efDate > maxEnd) maxEnd = c.efDate;
+              });
+              summaryCandidate.esDate = minStart;
+              summaryCandidate.efDate = maxEnd;
+              summaryCandidate.duration = Math.max(1, diffDaysISO(minStart, maxEnd));
+            }
+          }
+        });
 
         const visibleNodes = visibleTasks.map(vt => taskMap[vt.id]);
         const earliestISO = visibleNodes.reduce((min, t) => t.esDate < min ? t.esDate : min, visibleNodes[0]?.esDate || TODAY_ISO);
@@ -534,7 +571,7 @@
 
         visibleNodes.forEach(n => {
           n.float = Math.max(0, Math.round((n.ls - n.es) * 100) / 100);
-          n.isCritical = n.float === 0 && !n.done;
+          n.isCritical = n.float === 0 && !n.done && n.itemType !== "Summary";
         });
 
         return {
@@ -554,7 +591,7 @@
         });
 
         data.tasks.forEach(task => {
-          if (task.done || task.itemType === "Milestone") return;
+          if (task.done || task.itemType === "Milestone" || task.itemType === "Summary") return;
           const start = task.startDate || TODAY_ISO;
           const dur = Math.max(1, Math.ceil(Number(task.duration || 1)));
           const taskAssignments = task.assignments || [{ name: task.resource || "Lead", allocation: Number(task.allocation || 100) }];
@@ -588,7 +625,7 @@
         return loading;
       }, [data.tasks, data.resources]);
 
-      // Multi-scale timeline generator
+      // Timeline scale generator
       const timelineUnits = useMemo(() => {
         const totalDays = cpmSchedule.totalSpanDays;
         const anchor = cpmSchedule.anchorDate;
@@ -670,7 +707,7 @@
         setData(prev => ({ ...prev, tasks: updated }));
       };
 
-      // Add Deliverable
+      // Add Deliverable / Item
       const handleAddItem = (e) => {
         e.preventDefault();
         if (!qaName.trim()) return;
@@ -679,12 +716,17 @@
         const parsedDur = isMilestone ? 0 : Math.max(0.01, parseFloat(qaDuration) || 1);
         const assignedRes = qaResource || (data.resources[0]?.name || "Lead");
 
+        // WBS auto-sequencing: e.g. Project 1 -> 1.1, Project 2 -> 2.1
+        const prjTasks = data.tasks.filter(t => t.projectId === targetPrjId);
+        const suggestedWbs = `${activeProjectIndex}.${prjTasks.length + 1}`;
+
         const newItem = {
           id: "tsk-" + Date.now(),
           projectId: targetPrjId,
           itemType: qaType,
-          wbs: qaWbs.trim() || `1.${visibleTasks.length + 1}`,
+          wbs: qaWbs.trim() || suggestedWbs,
           name: qaName.trim(),
+          description: "",
           startDate: qaStartDate || TODAY_ISO,
           endDate: isMilestone ? (qaStartDate || TODAY_ISO) : addDaysISO(qaStartDate || TODAY_ISO, Math.ceil(parsedDur)),
           duration: parsedDur,
@@ -716,7 +758,7 @@
               if (value === "Milestone") {
                 updated.duration = 0;
                 updated.endDate = updated.startDate;
-              } else {
+              } else if (value === "Task") {
                 if (Number(updated.duration) <= 0) {
                   updated.duration = 1;
                   updated.endDate = addDaysISO(updated.startDate, 1);
@@ -730,7 +772,7 @@
                 updated.endDate = updated.startDate;
               } else {
                 updated.duration = parsed;
-                updated.itemType = "Task";
+                if (updated.itemType === "Milestone") updated.itemType = "Task";
                 updated.endDate = addDaysISO(updated.startDate, Math.ceil(parsed));
               }
             } else if (field === "startDate") {
@@ -741,7 +783,7 @@
               const diff = diffDaysISO(updated.startDate || TODAY_ISO, value);
               if (diff > 0) {
                 updated.duration = diff;
-                updated.itemType = "Task";
+                if (updated.itemType === "Milestone") updated.itemType = "Task";
               } else {
                 updated.duration = 0;
                 updated.itemType = "Milestone";
@@ -810,16 +852,44 @@
         }));
       };
 
-      // Program / Project / Resource Handlers
-      const handleProgramProjectSubmit = (e) => {
+      // Program / Project / Resource / Team Member Handlers
+      const handleProgramProjectSubmit = async (e) => {
         e.preventDefault();
 
         if (manageAction === "create") {
-          if (manageType === "resource") {
+          if (manageType === "team") {
+            if (!newMemberEmail.trim()) return;
+            // Invite team member via email flow
+            const newMember = {
+              id: "tm-" + Date.now(),
+              email: newMemberEmail.trim(),
+              role: newMemberRole,
+              permission: newMemberRole === "Editor" ? "Read-Write" : "Read-Only",
+              addedAt: TODAY_ISO
+            };
+            setData(prev => ({ ...prev, teamMembers: [...(prev.teamMembers || []), newMember] }));
+
+            // Dispatch Supabase invite OTP workflow
+            if (dbClient) {
+              try {
+                await dbClient.auth.signInWithOtp({ email: newMemberEmail.trim() });
+                alert(`Invitation sent to ${newMemberEmail.trim()}! They will receive a magic login link to access the workspace.`);
+              } catch (err) {
+                alert(`Team member added. Email notice could not be sent: ${err.message}`);
+              }
+            }
+            setNewMemberEmail("");
+          } else if (manageType === "resource") {
             if (!newResourceName.trim()) return;
-            const newRes = { id: "res-" + Date.now(), name: newResourceName.trim(), role: newResourceRole };
+            const newRes = {
+              id: "res-" + Date.now(),
+              name: newResourceName.trim(),
+              role: newResourceRole,
+              isAgent: !!newResourceIsAgent
+            };
             setData(prev => ({ ...prev, resources: [...(prev.resources || []), newRes] }));
             setNewResourceName("");
+            setNewResourceIsAgent(false);
           } else if (manageType === "program") {
             if (!editName.trim()) return;
             const newId = "pgm-" + Date.now();
@@ -899,9 +969,24 @@
       };
 
       const deleteResource = (resId) => {
+        setData(prev => ({ ...prev, resources: prev.resources.filter(r => r.id !== resId) }));
+      };
+
+      const updateTeamPermission = (memberId, newPerm) => {
         setData(prev => ({
           ...prev,
-          resources: prev.resources.filter(r => r.id !== resId)
+          teamMembers: (prev.teamMembers || []).map(m => m.id === memberId ? {
+            ...m,
+            permission: newPerm,
+            role: newPerm === "Read-Write" ? "Editor" : "Viewer"
+          } : m)
+        }));
+      };
+
+      const deleteTeamMember = (memberId) => {
+        setData(prev => ({
+          ...prev,
+          teamMembers: (prev.teamMembers || []).filter(m => m.id !== memberId)
         }));
       };
 
@@ -976,7 +1061,7 @@
       if (isAuthLoading) {
         return (
           <div className="min-h-screen bg-brand-navy flex items-center justify-center text-slate-400 text-sm">
-            Connecting to ApexPPM DB...
+            Connecting to Apex PPM DB...
           </div>
         );
       }
@@ -995,13 +1080,13 @@
                   </svg>
                 </div>
                 <div>
-                  <h1 className="text-xl font-bold tracking-tight text-white">ApexPPM</h1>
+                  <h1 className="text-xl font-bold tracking-tight text-white">Apex PPM</h1>
                   <p className="text-xs text-brand-emerald font-medium">Enterprise Program & Portfolio Suite</p>
                 </div>
               </div>
 
               <div className="text-xs text-slate-400 leading-relaxed">
-                Welcome to your multi-tenant PPM workspace. Resource load heatmaps, CPM forward/backward scheduling, RAID logs, and procurement controls powered by your secure DB.
+                Welcome to your multi-tenant PPM workspace. AI Agent assignees, summary rollups, resource load heatmaps, and procurement controls powered by your secure DB.
               </div>
 
               <div className="space-y-3 pt-2">
@@ -1049,7 +1134,7 @@
 
       return (
         <div className="min-h-screen flex flex-col transition-colors duration-200">
-          {/* Top Header */}
+          {/* Top Header - Updated title to "Apex PPM" */}
           <header className="border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-[#111827] px-4 md:px-6 py-3 flex items-center justify-between gap-4 shadow-sm no-print">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-2xl bg-[#0b1120] border border-slate-800 flex items-center justify-center p-1.5 shadow-md">
@@ -1061,7 +1146,7 @@
               </div>
               <div>
                 <div className="flex items-center gap-2">
-                  <h1 className="text-base md:text-lg font-bold tracking-tight text-slate-900 dark:text-white">ApexPPM</h1>
+                  <h1 className="text-base md:text-lg font-bold tracking-tight text-slate-900 dark:text-white">Apex PPM</h1>
                   <span className="text-[11px] px-2 py-0.5 rounded-full border bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30 font-medium">
                     ● {syncStatus}
                   </span>
@@ -1118,7 +1203,7 @@
               </button>
             </div>
 
-            {/* Top Right GitHub / Supabase Styled Account Profile Menu */}
+            {/* Top Right Account Profile Menu */}
             <div className="relative" ref={userMenuRef}>
               <button
                 onClick={() => setShowUserMenu(!showUserMenu)}
@@ -1219,7 +1304,7 @@
                   onSubmit={handleAddItem}
                   className="bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-sm flex flex-wrap items-end gap-2.5 no-print"
                 >
-                  <div className="w-24">
+                  <div className="w-28">
                     <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">Type</label>
                     <select
                       value={qaType}
@@ -1231,6 +1316,7 @@
                       className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-2 py-1.5 text-xs text-slate-900 dark:text-white font-semibold"
                     >
                       <option value="Task">Task</option>
+                      <option value="Summary">Summary Task</option>
                       <option value="Milestone">◆ Milestone</option>
                     </select>
                   </div>
@@ -1240,7 +1326,7 @@
                       type="text"
                       value={qaWbs}
                       onChange={(e) => setQaWbs(e.target.value)}
-                      placeholder={`1.${visibleTasks.length + 1}`}
+                      placeholder={`${activeProjectIndex}.${visibleTasks.length + 1}`}
                       className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-2 py-1.5 text-xs text-slate-900 dark:text-white"
                     />
                   </div>
@@ -1250,7 +1336,7 @@
                       type="text"
                       value={qaName}
                       onChange={(e) => setQaName(e.target.value)}
-                      placeholder={qaType === "Milestone" ? "Stage Gate / Review Signoff..." : "Deliverable description..."}
+                      placeholder={qaType === "Summary" ? "e.g. 1.0 Proposal Creation & Submission" : qaType === "Milestone" ? "Stage Gate / Review Signoff..." : "Deliverable description..."}
                       className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-900 dark:text-white"
                     />
                   </div>
@@ -1285,7 +1371,7 @@
                       className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-2 py-1.5 text-xs text-slate-900 dark:text-white"
                     >
                       {(data.resources || []).map(r => (
-                        <option key={r.id} value={r.name}>{r.name}</option>
+                        <option key={r.id} value={r.name}>{r.isAgent ? "🤖 " : ""}{r.name}</option>
                       ))}
                     </select>
                   </div>
@@ -1310,7 +1396,7 @@
                 </form>
               )}
 
-              {/* CARD 1: Deliverables Table Grid */}
+              {/* CARD 1: Deliverables Table Grid with Distinct Project Badges & Descriptions */}
               {activeTab === "gantt" && (
                 <div className="bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-sm">
                   <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-800 flex justify-between items-center bg-slate-50/50 dark:bg-slate-900/50">
@@ -1318,7 +1404,7 @@
                       Deliverables, WBS & Cross-Project Dependencies
                     </h3>
                     <div className="text-[11px] text-slate-500">
-                      {cpmSchedule.tasks.length} items • Reorder with ▲ / ▼
+                      {cpmSchedule.tasks.length} items • Reorder with ▲ / ▼ • Click 📝 for Scope Description
                     </div>
                   </div>
                   <div className="overflow-x-auto">
@@ -1327,9 +1413,11 @@
                         <tr className="border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/90 text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
                           <th className="w-12 px-2 py-3 text-center border-r border-slate-200 dark:border-slate-800">ORDER</th>
                           <th className="w-10 px-2 py-3 text-center border-r border-slate-200 dark:border-slate-800">DONE</th>
+                          <th className="w-16 px-2 py-3 border-r border-slate-200 dark:border-slate-800">PROJECT</th>
                           <th className="w-16 px-2 py-3 border-r border-slate-200 dark:border-slate-800">WBS</th>
                           <th className="w-24 px-2 py-3 border-r border-slate-200 dark:border-slate-800">TYPE</th>
                           <th className="min-w-[200px] px-3 py-3 border-r border-slate-200 dark:border-slate-800">DELIVERABLE</th>
+                          <th className="w-14 px-1 py-3 text-center border-r border-slate-200 dark:border-slate-800">SCOPE</th>
                           <th className="min-w-[180px] px-3 py-3 border-r border-slate-200 dark:border-slate-800">PREDECESSORS</th>
                           <th className="min-w-[110px] px-2 py-3 border-r border-slate-200 dark:border-slate-800">START</th>
                           <th className="min-w-[110px] px-2 py-3 border-r border-slate-200 dark:border-slate-800">END</th>
@@ -1342,154 +1430,184 @@
                       <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
                         {cpmSchedule.tasks.length === 0 ? (
                           <tr>
-                            <td colSpan="12" className="text-center py-8 text-slate-400 text-xs">
+                            <td colSpan="14" className="text-center py-8 text-slate-400 text-xs">
                               No deliverables found. Add a deliverable or milestone above!
                             </td>
                           </tr>
                         ) : (
-                          cpmSchedule.tasks.map((t, idx) => (
-                            <tr key={t.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
-                              <td className="px-1 py-2 text-center border-r border-slate-200 dark:border-slate-800">
-                                <div className="flex items-center justify-center gap-0.5">
-                                  <button
-                                    onClick={() => moveTaskOrder(t.id, "up")}
-                                    disabled={idx === 0}
-                                    className="p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-30 text-[10px]"
-                                    title="Move Up"
+                          cpmSchedule.tasks.map((t, idx) => {
+                            const taskPrj = data.projects.find(p => p.id === t.projectId);
+                            const isSummary = t.itemType === "Summary";
+                            return (
+                              <tr key={t.id} className={`hover:bg-slate-50 dark:hover:bg-slate-800/40 ${isSummary ? 'bg-slate-100/60 dark:bg-slate-800/60 font-semibold' : ''}`}>
+                                <td className="px-1 py-2 text-center border-r border-slate-200 dark:border-slate-800">
+                                  <div className="flex items-center justify-center gap-0.5">
+                                    <button
+                                      onClick={() => moveTaskOrder(t.id, "up")}
+                                      disabled={idx === 0}
+                                      className="p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-30 text-[10px]"
+                                      title="Move Up"
+                                    >
+                                      ▲
+                                    </button>
+                                    <button
+                                      onClick={() => moveTaskOrder(t.id, "down")}
+                                      disabled={idx === cpmSchedule.tasks.length - 1}
+                                      className="p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-30 text-[10px]"
+                                      title="Move Down"
+                                    >
+                                      ▼
+                                    </button>
+                                  </div>
+                                </td>
+
+                                <td className="px-2 py-2 text-center border-r border-slate-200 dark:border-slate-800">
+                                  <input
+                                    type="checkbox"
+                                    checked={!!t.done}
+                                    onChange={(e) => updateTaskField(t.id, "done", e.target.checked)}
+                                    className="w-4 h-4 rounded accent-brand-emerald cursor-pointer"
+                                  />
+                                </td>
+
+                                {/* Project Tag Badge */}
+                                <td className="px-2 py-2 border-r border-slate-200 dark:border-slate-800 font-mono text-[10px]">
+                                  <span className="px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold">
+                                    {taskPrj?.code || "PRJ"}
+                                  </span>
+                                </td>
+
+                                <td className="px-2 py-2 border-r border-slate-200 dark:border-slate-800 font-mono text-[11px]">
+                                  <input
+                                    type="text"
+                                    value={t.wbs}
+                                    onChange={(e) => updateTaskField(t.id, "wbs", e.target.value)}
+                                    className="w-12 bg-transparent border-b border-transparent hover:border-slate-400 focus:border-brand-emerald outline-none"
+                                  />
+                                </td>
+
+                                <td className="px-2 py-1.5 border-r border-slate-200 dark:border-slate-800">
+                                  <select
+                                    value={t.itemType || "Task"}
+                                    onChange={(e) => updateTaskField(t.id, "itemType", e.target.value)}
+                                    className="bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded px-1.5 py-0.5 text-[10px] font-semibold"
                                   >
-                                    ▲
-                                  </button>
+                                    <option value="Task">Task</option>
+                                    <option value="Summary">Summary</option>
+                                    <option value="Milestone">◆ Milestone</option>
+                                  </select>
+                                </td>
+
+                                <td className="px-3 py-2 border-r border-slate-200 dark:border-slate-800 font-medium text-slate-900 dark:text-white">
+                                  {t.itemType === "Milestone" && <span className="text-brand-emerald mr-1.5">◆</span>}
+                                  {isSummary && <span className="text-indigo-400 mr-1.5 font-bold">📂</span>}
+                                  {t.name}
+                                </td>
+
+                                {/* Description / Scope Trigger */}
+                                <td className="px-1 py-1.5 text-center border-r border-slate-200 dark:border-slate-800">
                                   <button
-                                    onClick={() => moveTaskOrder(t.id, "down")}
-                                    disabled={idx === cpmSchedule.tasks.length - 1}
-                                    className="p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-30 text-[10px]"
-                                    title="Move Down"
+                                    onClick={() => setDescModalTask(t)}
+                                    className={`px-1.5 py-0.5 rounded text-[10px] font-medium transition ${t.description ? 'bg-brand-emerald/10 text-brand-emerald border border-brand-emerald/30 font-bold' : 'text-slate-400 hover:text-slate-200'}`}
+                                    title="View & Edit Task Description & AI Agent Prompt"
                                   >
-                                    ▼
+                                    {t.description ? '📝 Edit' : '+ Scope'}
                                   </button>
-                                </div>
-                              </td>
+                                </td>
 
-                              <td className="px-2 py-2 text-center border-r border-slate-200 dark:border-slate-800">
-                                <input
-                                  type="checkbox"
-                                  checked={!!t.done}
-                                  onChange={(e) => updateTaskField(t.id, "done", e.target.checked)}
-                                  className="w-4 h-4 rounded accent-brand-emerald cursor-pointer"
-                                />
-                              </td>
+                                {/* Multi-Predecessor Tags & Management */}
+                                <td className="px-2 py-1.5 border-r border-slate-200 dark:border-slate-800">
+                                  <div className="flex flex-wrap items-center gap-1">
+                                    {(t.predecessors || []).map((pRef, pIdx) => {
+                                      const pTask = cpmSchedule.rawMap[pRef.id];
+                                      return (
+                                        <span key={pIdx} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-[10px] font-mono">
+                                          <span>{pTask ? pTask.wbs : "?"}{pRef.type}</span>
+                                          <button
+                                            onClick={() => removePredecessor(t.id, pRef.id)}
+                                            className="text-slate-400 hover:text-rose-500"
+                                          >
+                                            ×
+                                          </button>
+                                        </span>
+                                      );
+                                    })}
+                                    <button
+                                      onClick={() => setMultiDepModalTask(t)}
+                                      className="px-1.5 py-0.5 rounded border border-dashed border-slate-300 dark:border-slate-700 text-slate-500 hover:text-brand-emerald text-[10px] font-semibold"
+                                    >
+                                      + Link
+                                    </button>
+                                  </div>
+                                </td>
 
-                              <td className="px-2 py-2 border-r border-slate-200 dark:border-slate-800 font-mono text-[11px]">
-                                <input
-                                  type="text"
-                                  value={t.wbs}
-                                  onChange={(e) => updateTaskField(t.id, "wbs", e.target.value)}
-                                  className="w-12 bg-transparent border-b border-transparent hover:border-slate-400 focus:border-brand-emerald outline-none"
-                                />
-                              </td>
+                                <td className="px-1.5 py-1.5 border-r border-slate-200 dark:border-slate-800">
+                                  <input
+                                    type="date"
+                                    value={t.esDate}
+                                    disabled={isSummary}
+                                    onChange={(e) => updateTaskField(t.id, "startDate", e.target.value)}
+                                    className="bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded px-1.5 py-0.5 text-[11px] disabled:opacity-50"
+                                  />
+                                </td>
+                                <td className="px-1.5 py-1.5 border-r border-slate-200 dark:border-slate-800">
+                                  <input
+                                    type="date"
+                                    value={t.efDate}
+                                    disabled={t.itemType === "Milestone" || isSummary}
+                                    onChange={(e) => updateTaskField(t.id, "endDate", e.target.value)}
+                                    className="bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded px-1.5 py-0.5 text-[11px] disabled:opacity-50"
+                                  />
+                                </td>
 
-                              <td className="px-2 py-1.5 border-r border-slate-200 dark:border-slate-800">
-                                <select
-                                  value={t.itemType || "Task"}
-                                  onChange={(e) => updateTaskField(t.id, "itemType", e.target.value)}
-                                  className="bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded px-1.5 py-0.5 text-[10px] font-semibold"
-                                >
-                                  <option value="Task">Task</option>
-                                  <option value="Milestone">◆ Milestone</option>
-                                </select>
-                              </td>
+                                <td className="px-1 py-1.5 text-center border-r border-slate-200 dark:border-slate-800">
+                                  <input
+                                    type="number"
+                                    step="any"
+                                    min="0"
+                                    disabled={isSummary}
+                                    value={t.itemType === "Milestone" ? 0 : t.duration}
+                                    onChange={(e) => updateTaskField(t.id, "duration", e.target.value)}
+                                    className="w-16 bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded px-1.5 py-0.5 text-center font-mono text-xs disabled:opacity-50"
+                                  />
+                                </td>
 
-                              <td className="px-3 py-2 border-r border-slate-200 dark:border-slate-800 font-medium text-slate-900 dark:text-white">
-                                {t.itemType === "Milestone" && <span className="text-brand-emerald mr-1.5">◆</span>}
-                                {t.name}
-                              </td>
+                                {/* Multi-Resource Assignment Trigger with AI Agent Badging */}
+                                <td className="px-2 py-1.5 border-r border-slate-200 dark:border-slate-800">
+                                  <div className="flex flex-wrap items-center gap-1">
+                                    {(t.assignments || []).map((asgn, aIdx) => {
+                                      const isAg = data.resources?.find(r => r.name === asgn.name)?.isAgent;
+                                      return (
+                                        <span key={aIdx} className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium border ${isAg ? 'bg-purple-500/10 text-purple-400 border-purple-500/30' : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'}`}>
+                                          <span>{isAg ? "🤖 " : ""}{asgn.name.split(" ")[0]} ({asgn.allocation}%)</span>
+                                        </span>
+                                      );
+                                    })}
+                                    <button
+                                      onClick={() => setAssignModalTask(t)}
+                                      className="px-1.5 py-0.5 rounded border border-dashed border-slate-300 dark:border-slate-700 text-slate-500 hover:text-brand-emerald text-[10px]"
+                                      title="Edit Resource Assignments"
+                                    >
+                                      ⚙️ Assign
+                                    </button>
+                                  </div>
+                                </td>
 
-                              <td className="px-2 py-1.5 border-r border-slate-200 dark:border-slate-800">
-                                <div className="flex flex-wrap items-center gap-1">
-                                  {(t.predecessors || []).map((pRef, pIdx) => {
-                                    const pTask = cpmSchedule.rawMap[pRef.id];
-                                    return (
-                                      <span key={pIdx} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-[10px] font-mono">
-                                        <span>{pTask ? pTask.wbs : "?"}{pRef.type}</span>
-                                        <button
-                                          onClick={() => removePredecessor(t.id, pRef.id)}
-                                          className="text-slate-400 hover:text-rose-500"
-                                        >
-                                          ×
-                                        </button>
-                                      </span>
-                                    );
-                                  })}
+                                <td className="px-1 py-2 text-center border-r border-slate-200 dark:border-slate-800 font-mono text-[11px]">
+                                  {t.isCritical ? <span className="text-rose-500 font-bold">0d (CP)</span> : isSummary ? <span className="text-slate-400">—</span> : <span className="text-emerald-500">+{t.float}d</span>}
+                                </td>
+
+                                <td className="px-1 py-2 text-center">
                                   <button
-                                    onClick={() => setMultiDepModalTask(t)}
-                                    className="px-1.5 py-0.5 rounded border border-dashed border-slate-300 dark:border-slate-700 text-slate-500 hover:text-brand-emerald text-[10px] font-semibold"
+                                    onClick={() => deleteTask(t.id)}
+                                    className="text-slate-400 hover:text-rose-500 font-bold px-1"
                                   >
-                                    + Link
+                                    ✕
                                   </button>
-                                </div>
-                              </td>
-
-                              <td className="px-1.5 py-1.5 border-r border-slate-200 dark:border-slate-800">
-                                <input
-                                  type="date"
-                                  value={t.esDate}
-                                  onChange={(e) => updateTaskField(t.id, "startDate", e.target.value)}
-                                  className="bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded px-1.5 py-0.5 text-[11px]"
-                                />
-                              </td>
-                              <td className="px-1.5 py-1.5 border-r border-slate-200 dark:border-slate-800">
-                                <input
-                                  type="date"
-                                  value={t.efDate}
-                                  disabled={t.itemType === "Milestone"}
-                                  onChange={(e) => updateTaskField(t.id, "endDate", e.target.value)}
-                                  className="bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded px-1.5 py-0.5 text-[11px] disabled:opacity-50"
-                                />
-                              </td>
-
-                              <td className="px-1 py-1.5 text-center border-r border-slate-200 dark:border-slate-800">
-                                <input
-                                  type="number"
-                                  step="any"
-                                  min="0"
-                                  value={t.itemType === "Milestone" ? 0 : t.duration}
-                                  onChange={(e) => updateTaskField(t.id, "duration", e.target.value)}
-                                  className="w-16 bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded px-1.5 py-0.5 text-center font-mono text-xs"
-                                />
-                              </td>
-
-                              {/* Multi-Resource Assignment Trigger */}
-                              <td className="px-2 py-1.5 border-r border-slate-200 dark:border-slate-800">
-                                <div className="flex flex-wrap items-center gap-1">
-                                  {(t.assignments || []).map((asgn, aIdx) => (
-                                    <span key={aIdx} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 text-[10px] font-medium">
-                                      <span>{asgn.name.split(" ")[0]} ({asgn.allocation}%)</span>
-                                    </span>
-                                  ))}
-                                  <button
-                                    onClick={() => setAssignModalTask(t)}
-                                    className="px-1.5 py-0.5 rounded border border-dashed border-slate-300 dark:border-slate-700 text-slate-500 hover:text-brand-emerald text-[10px]"
-                                    title="Edit Resource Assignments"
-                                  >
-                                    ⚙️ Assign
-                                  </button>
-                                </div>
-                              </td>
-
-                              <td className="px-1 py-2 text-center border-r border-slate-200 dark:border-slate-800 font-mono text-[11px]">
-                                {t.isCritical ? <span className="text-rose-500 font-bold">0d (CP)</span> : <span className="text-emerald-500">+{t.float}d</span>}
-                              </td>
-
-                              <td className="px-1 py-2 text-center">
-                                <button
-                                  onClick={() => deleteTask(t.id)}
-                                  className="text-slate-400 hover:text-rose-500 font-bold px-1"
-                                >
-                                  ✕
-                                </button>
-                              </td>
-                            </tr>
-                          ))
+                                </td>
+                              </tr>
+                            );
+                          })
                         )}
                       </tbody>
                     </table>
@@ -1497,7 +1615,7 @@
                 </div>
               )}
 
-              {/* CARD 2: Dedicated Full-Width Gantt Chart with SVG Arrows */}
+              {/* CARD 2: Dedicated Full-Width Gantt Chart with SVG Arrows & Hammock Summary Bars */}
               {activeTab === "gantt" && (
                 <div className="bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-sm">
                   <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-800 flex flex-wrap justify-between items-center gap-3 bg-slate-50/50 dark:bg-slate-900/50">
@@ -1528,6 +1646,7 @@
                       <div className="flex items-center gap-3 text-[11px] pl-2 border-l border-slate-300 dark:border-slate-700">
                         <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded bg-rose-500"></span> Critical</span>
                         <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded bg-brand-emerald"></span> Standard</span>
+                        <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded bg-slate-600 border border-slate-400"></span> Summary</span>
                         <span className="flex items-center gap-1.5"><span className="text-brand-emerald font-bold">◆</span> Milestone</span>
                         <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded bg-amber-400"></span> Stat Holiday</span>
                       </div>
@@ -1628,10 +1747,16 @@
                           const leftPos = 240 + t.es * pxPerDay;
                           const widthPx = Math.max(16, (t.itemType === "Milestone" ? 0 : t.duration) * pxPerDay - 4);
                           const isMilestone = t.itemType === "Milestone";
+                          const isSummary = t.itemType === "Summary";
+                          const taskPrj = data.projects.find(p => p.id === t.projectId);
+
                           return (
                             <div key={t.id} className="flex items-center h-8 relative hover:bg-slate-50 dark:hover:bg-slate-800/30 rounded">
                               <div className="w-[240px] shrink-0 pr-3 truncate text-xs font-medium text-slate-700 dark:text-slate-300 flex items-center justify-between">
-                                <span className="truncate">{t.wbs} {t.name}</span>
+                                <span className="truncate">
+                                  <span className="font-mono text-[10px] text-slate-400 mr-1">[{taskPrj?.code || 'PRJ'}]</span>
+                                  {t.wbs} {t.name}
+                                </span>
                                 <span className="text-[10px] text-slate-400 font-mono ml-1">{isMilestone ? "0d" : `${t.duration}d`}</span>
                               </div>
 
@@ -1644,6 +1769,16 @@
                                   title={`Milestone: ${t.wbs} ${t.name} (${t.esDate})`}
                                 >
                                   <div className="w-1.5 h-1.5 bg-white rounded-full -rotate-45" />
+                                </div>
+                              ) : isSummary ? (
+                                /* Hammock bracket style for Summary Task */
+                                <div
+                                  style={{ left: `${leftPos}px`, width: `${widthPx}px` }}
+                                  className="absolute h-3 bg-slate-700 border-t-2 border-b-2 border-slate-400 rounded-sm z-10"
+                                  title={`Summary Task: ${t.wbs} ${t.name}`}
+                                >
+                                  <div className="absolute -left-1 -top-1 w-2 h-5 bg-slate-400" />
+                                  <div className="absolute -right-1 -top-1 w-2 h-5 bg-slate-400" />
                                 </div>
                               ) : (
                                 <div
@@ -1709,7 +1844,10 @@
                             return (
                               <tr key={res.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
                                 <td className="px-4 py-3 sticky left-0 bg-white dark:bg-[#111827] border-r border-slate-200 dark:border-slate-800">
-                                  <div className="font-bold text-slate-900 dark:text-white">{res.name}</div>
+                                  <div className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                                    {res.isAgent && <span title="AI Autonomous Agent">🤖</span>}
+                                    {res.name}
+                                  </div>
                                   <div className="text-[10px] text-slate-500">{res.role}</div>
                                 </td>
                                 <td className="px-3 py-3 text-center border-r border-slate-200 dark:border-slate-800">
@@ -2018,7 +2156,7 @@
                       {cpmSchedule.tasks.filter((t) => t.status === col).map((t) => (
                         <div key={t.id} className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-1.5 shadow-sm">
                           <div className="flex justify-between items-center text-[11px] font-mono text-brand-emerald">
-                            <span>{t.wbs} {t.itemType === 'Milestone' && '◆'}</span>
+                            <span>{t.wbs} {t.itemType === 'Milestone' && '◆'}{t.itemType === 'Summary' && '📂'}</span>
                             <span className="text-slate-400">{t.duration}d • {t.allocation}% effort</span>
                           </div>
                           <div className="text-xs font-semibold text-slate-900 dark:text-white">{t.name}</div>
@@ -2031,6 +2169,56 @@
               )}
             </main>
           </div>
+
+          {/* Task Scope & Description Modal (AI Agent Prompt & Work Log) */}
+          {descModalTask && (
+            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+              <div className="bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-800 rounded-3xl p-6 w-full max-w-lg space-y-4 shadow-2xl">
+                <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
+                  <div>
+                    <h3 className="font-bold text-base text-slate-900 dark:text-white">
+                      Task Scope & AI Agent Instructions
+                    </h3>
+                    <p className="text-xs text-slate-500">{descModalTask.wbs} {descModalTask.name}</p>
+                  </div>
+                  <button type="button" onClick={() => setDescModalTask(null)} className="text-slate-400 hover:text-white">✕</button>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
+                    Scope Description / Acceptance Criteria / Agent Prompt
+                  </label>
+                  <textarea
+                    rows={6}
+                    value={descModalTask.description || ""}
+                    onChange={(e) => setDescModalTask({ ...descModalTask, description: e.target.value })}
+                    placeholder="Document deliverable scope, technical requirements, acceptance criteria, or automated instructions for assigned AI agents..."
+                    className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl p-3 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-brand-emerald"
+                  />
+                </div>
+
+                <div className="flex gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      updateTaskField(descModalTask.id, "description", descModalTask.description);
+                      setDescModalTask(null);
+                    }}
+                    className="flex-1 py-2 rounded-xl bg-brand-emerald hover:bg-brand-emeraldHover text-brand-navy font-bold text-xs"
+                  >
+                    Save Scope Details
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDescModalTask(null)}
+                    className="px-4 py-2 rounded-xl bg-slate-200 dark:bg-slate-800 text-xs font-semibold"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Multiple Resource Assignment Modal */}
           {assignModalTask && (
@@ -2059,7 +2247,7 @@
                         className="flex-1 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-2 py-1 text-xs"
                       >
                         {(data.resources || []).map(r => (
-                          <option key={r.id} value={r.name}>{r.name}</option>
+                          <option key={r.id} value={r.name}>{r.isAgent ? "🤖 " : ""}{r.name}</option>
                         ))}
                       </select>
                       <div className="flex items-center gap-1">
@@ -2103,7 +2291,7 @@
                   }}
                   className="w-full py-1.5 rounded-xl border border-dashed border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:text-brand-emerald text-xs font-semibold"
                 >
-                  + Add Another Resource
+                  + Add Another Resource / AI Agent
                 </button>
 
                 <div className="flex gap-2 pt-2">
@@ -2205,13 +2393,13 @@
             </div>
           )}
 
-          {/* Manage Modal (Programs, Projects, Team Resources) */}
+          {/* Manage Modal (Programs, Projects, Team Access, AI Resources) */}
           {showManageModal && (
             <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
               <div className="bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-800 rounded-3xl p-6 w-full max-w-xl space-y-4 shadow-2xl">
                 <div className="flex items-center justify-between">
                   <h3 className="font-bold text-base text-slate-900 dark:text-white">
-                    Portfolio & Resource Manager
+                    Portfolio, Access & Resource Manager
                   </h3>
                   <button type="button" onClick={() => setShowManageModal(false)} className="text-slate-400 hover:text-white">✕</button>
                 </div>
@@ -2222,7 +2410,7 @@
                     onClick={() => { setManageAction("create"); }}
                     className={`py-1.5 rounded-xl transition ${manageAction === "create" ? "bg-brand-emerald text-brand-navy shadow-sm" : "text-slate-500"}`}
                   >
-                    + Create New
+                    + Create / Invite
                   </button>
                   <button
                     type="button"
@@ -2252,7 +2440,7 @@
                     onClick={() => setManageAction("list")}
                     className={`py-1.5 rounded-xl transition ${manageAction === "list" ? "bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm" : "text-slate-500"}`}
                   >
-                    📋 View All & Delete
+                    📋 View All & Access
                   </button>
                 </div>
 
@@ -2277,14 +2465,49 @@
                       onClick={() => { setManageType("resource"); }}
                       className={`flex-1 py-1.5 rounded-xl text-xs font-bold transition ${manageType === "resource" ? "bg-slate-200 dark:bg-slate-700 text-slate-900 dark:text-white" : "text-slate-400"}`}
                     >
-                      Team Resource
+                      Resource / AI Agent
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setManageType("team"); }}
+                      className={`flex-1 py-1.5 rounded-xl text-xs font-bold transition ${manageType === "team" ? "bg-slate-200 dark:bg-slate-700 text-slate-900 dark:text-white" : "text-slate-400"}`}
+                    >
+                      ✉️ Team Invite
                     </button>
                   </div>
                 )}
 
                 {manageAction !== "list" ? (
                   <form onSubmit={handleProgramProjectSubmit} className="space-y-3 pt-1">
-                    {manageType === "resource" ? (
+                    {manageType === "team" ? (
+                      <div className="space-y-3">
+                        <div>
+                          <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Team Member Email Address</label>
+                          <input
+                            type="email"
+                            required
+                            value={newMemberEmail}
+                            onChange={(e) => setNewMemberEmail(e.target.value)}
+                            placeholder="colleague@company.com"
+                            className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-xs"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Access Role & Permission</label>
+                          <select
+                            value={newMemberRole}
+                            onChange={(e) => setNewMemberRole(e.target.value)}
+                            className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-xs"
+                          >
+                            <option value="Editor">Editor (Read-Write Access)</option>
+                            <option value="Viewer">Viewer (Read-Only Access)</option>
+                          </select>
+                        </div>
+                        <p className="text-[10px] text-slate-500">
+                          Adding a member sends an automated invitation email containing a secure magic-link to join your workspace.
+                        </p>
+                      </div>
+                    ) : manageType === "resource" ? (
                       <div className="space-y-3">
                         <div>
                           <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Resource Name</label>
@@ -2292,7 +2515,7 @@
                             type="text"
                             value={newResourceName}
                             onChange={(e) => setNewResourceName(e.target.value)}
-                            placeholder="e.g. Alex Chen"
+                            placeholder="e.g. Alex Chen or Compliance Bot"
                             className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-xs"
                           />
                         </div>
@@ -2302,8 +2525,21 @@
                             type="text"
                             value={newResourceRole}
                             onChange={(e) => setNewResourceRole(e.target.value)}
+                            placeholder="e.g. Fullstack Engineer or Autonomous Code Agent"
                             className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-xs"
                           />
+                        </div>
+                        <div className="flex items-center gap-2 pt-1">
+                          <input
+                            type="checkbox"
+                            id="isAgentCheck"
+                            checked={newResourceIsAgent}
+                            onChange={(e) => setNewResourceIsAgent(e.target.checked)}
+                            className="accent-brand-emerald"
+                          />
+                          <label htmlFor="isAgentCheck" className="text-xs text-slate-300 font-medium">
+                            Register as an <strong>Autonomous AI Agent</strong> (Enables API task pickup & completion)
+                          </label>
                         </div>
                       </div>
                     ) : (
@@ -2383,7 +2619,7 @@
 
                     <div className="flex gap-2 pt-2">
                       <button type="submit" className="flex-1 py-2.5 rounded-xl bg-brand-emerald hover:bg-brand-emeraldHover text-brand-navy font-bold text-xs transition">
-                        {manageAction === "create" ? `Add ${manageType}` : "Save Changes"}
+                        {manageAction === "create" ? (manageType === "team" ? "Send Invitation Email" : `Add ${manageType}`) : "Save Changes"}
                       </button>
                       <button type="button" onClick={() => setShowManageModal(false)} className="px-4 py-2.5 rounded-xl bg-slate-200 dark:bg-slate-800 text-xs font-semibold">
                         Cancel
@@ -2392,13 +2628,39 @@
                   </form>
                 ) : (
                   <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-1">
+                    {/* Team Members & Permission Management */}
                     <div>
-                      <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">Team Resources</h4>
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">Workspace Team Members & RBAC</h4>
+                      <div className="space-y-1.5">
+                        {(data.teamMembers || []).map(member => (
+                          <div key={member.id} className="flex items-center justify-between p-2.5 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 text-xs">
+                            <div>
+                              <div className="font-bold text-slate-900 dark:text-white">{member.email}</div>
+                              <div className="text-[10px] text-slate-500">Joined: {member.addedAt}</div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <select
+                                value={member.permission}
+                                onChange={(e) => updateTeamPermission(member.id, e.target.value)}
+                                className="bg-slate-200 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded px-2 py-0.5 text-[10px] font-semibold"
+                              >
+                                <option value="Read-Write">Read-Write</option>
+                                <option value="Read-Only">Read-Only</option>
+                              </select>
+                              <button onClick={() => deleteTeamMember(member.id)} className="text-slate-400 hover:text-rose-500 font-bold px-1.5">✕</button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div>
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">Team Resources & AI Agents</h4>
                       <div className="space-y-1.5">
                         {(data.resources || []).map(res => (
                           <div key={res.id} className="flex items-center justify-between p-2.5 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 text-xs">
                             <div>
-                              <span className="font-bold text-slate-900 dark:text-white">{res.name}</span>
+                              <span className="font-bold text-slate-900 dark:text-white">{res.isAgent ? "🤖 " : ""}{res.name}</span>
                               <span className="text-[10px] text-slate-500 ml-2">({res.role})</span>
                             </div>
                             <button onClick={() => deleteResource(res.id)} className="text-slate-400 hover:text-rose-500 font-bold px-2 py-1">✕</button>
@@ -2467,7 +2729,7 @@
 
                 <div id="executive-report-content" className="flex-1 overflow-y-auto p-4 bg-slate-50 dark:bg-slate-900/50 rounded-2xl border border-slate-200 dark:border-slate-800 text-xs space-y-4 text-slate-800 dark:text-slate-200">
                   <div className="border-b border-slate-300 dark:border-slate-700 pb-3">
-                    <h2 className="text-base font-bold text-brand-emerald">ApexPPM — Executive Project & Program Report</h2>
+                    <h2 className="text-base font-bold text-brand-emerald">Apex PPM — Executive Project & Program Report</h2>
                     <p className="text-[11px] text-slate-500">Date: {new Date().toLocaleDateString("en-US", { dateStyle: "full" })}</p>
                   </div>
 
