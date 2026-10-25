@@ -120,9 +120,9 @@
       { date: "2026-06-19", name: "Juneteenth (US)" },
       { date: "2026-07-04", name: "Independence Day (US)" },
       { date: "2026-09-07", name: "Labor Day (US/CA)" },
-      { date: "2026-10-12", name: "Columbus Day / Indigenous Peoples (US)" },
+      { date: "2026-10-12", name: "Columbus Day (US)" },
       { date: "2026-11-11", name: "Veterans Day (US)" },
-      { date: "2026-11-26", name: "Thanksgiving (US)" },
+      { date: "2026-11-26", name: "Thanksgiving Day (US)" },
       { date: "2026-12-25", name: "Christmas Day (US/CA)" }
     ];
 
@@ -224,7 +224,7 @@
 
       // Gantt Zoom & Timeline Scale & Holiday Region Selector
       const [ganttScale, setGanttScale] = useState("day");
-      const [holidayRegion, setHolidayRegion] = useState("CA_AB"); // "CA_AB" | "US" | "BOTH" | "NONE"
+      const [holidayRegion, setHolidayRegion] = useState("BOTH"); // Default to cross-border
 
       const activeStatHolidays = useMemo(() => {
         if (holidayRegion === "CA_AB") return CA_STAT_HOLIDAYS_2026;
@@ -232,7 +232,7 @@
         if (holidayRegion === "BOTH") {
           const map = {};
           [...CA_STAT_HOLIDAYS_2026, ...US_STAT_HOLIDAYS_2026].forEach(h => {
-            map[h.date] = map[h.date] ? `${map[h.date]} / ${h.name}` : h.name;
+            map[h.date] = map[h.date] ? `${map[h.date]} & ${h.name}` : h.name;
           });
           return Object.keys(map).map(date => ({ date, name: map[date] }));
         }
@@ -247,10 +247,11 @@
       const [descModalTask, setDescModalTask] = useState(null);
 
       // Management Form State
-      const [manageAction, setManageAction] = useState("edit"); // "create" | "edit" | "list"
-      const [manageType, setManageType] = useState("project"); // "program" | "project" | "resource" | "team"
+      const [manageAction, setManageAction] = useState("edit");
+      const [manageType, setManageType] = useState("project"); // "project" | "program" | "resource" | "team"
       const [selectedEditProgramId, setSelectedEditProgramId] = useState("");
       const [selectedEditProjectId, setSelectedEditProjectId] = useState("");
+      const [selectedEditResourceId, setSelectedEditResourceId] = useState("");
       const [editCode, setEditCode] = useState("");
       const [editName, setEditName] = useState("");
       const [editManager, setEditManager] = useState("");
@@ -280,7 +281,7 @@
         }
       }, [data.resources]);
 
-      // When opening or switching Edit Active, bind to actual selected project / program
+      // Populators for Edit Active
       const loadProjectForEdit = (prjId) => {
         const prj = data.projects.find(p => p.id === prjId) || data.projects[0];
         if (prj) {
@@ -302,14 +303,24 @@
         }
       };
 
+      const loadResourceForEdit = (resId) => {
+        const res = data.resources.find(r => r.id === resId) || data.resources[0];
+        if (res) {
+          setSelectedEditResourceId(res.id);
+          setNewResourceName(res.name);
+          setNewResourceRole(res.role || "Team Member");
+          setNewResourceIsAgent(!!res.isAgent);
+        }
+      };
+
       const openManageModal = () => {
         setManageAction("edit");
         setManageType("project");
-        // Bind to active project if selected, else first project
         const targetPrjId = selectedProjectId !== "ALL" ? selectedProjectId : (data.projects[0]?.id || "");
         loadProjectForEdit(targetPrjId);
         const targetPgmId = selectedProgramId !== "ALL" ? selectedProgramId : (data.programs[0]?.id || "");
         loadProgramForEdit(targetPgmId);
+        if (data.resources.length > 0) loadResourceForEdit(data.resources[0].id);
         setShowManageModal(true);
       };
 
@@ -498,7 +509,7 @@
         return data.projects.filter(p => p.programId === selectedProgramId);
       }, [data.projects, selectedProgramId]);
 
-      // GROUPED TASKS BY PROJECT: Guarantees PRJ-01 tasks stay together, then PRJ-02 tasks, etc.
+      // Project Grouping (PRJ-01 deliverables together, then PRJ-02)
       const groupedVisibleTasks = useMemo(() => {
         const activeProjects = selectedProjectId !== "ALL"
           ? data.projects.filter(p => p.id === selectedProjectId)
@@ -514,15 +525,14 @@
         }).filter(g => g.tasks.length > 0 || selectedProjectId !== "ALL");
       }, [data.tasks, data.projects, selectedProjectId, selectedProgramId, programProjects]);
 
-      // Flattened for CPM forward/backward calculations while preserving project grouping sequence
       const visibleTasks = useMemo(() => {
         return groupedVisibleTasks.flatMap(g => g.tasks);
       }, [groupedVisibleTasks]);
 
-      // CPM Engine with Hierarchical Summary Task Rollups
+      // CPM Engine with Minimum 100-Day Planning Horizon
       const cpmSchedule = useMemo(() => {
         if (visibleTasks.length === 0) {
-          return { tasks: [], anchorDate: TODAY_ISO, totalSpanDays: 30, criticalCount: 0, rawMap: {} };
+          return { tasks: [], anchorDate: TODAY_ISO, totalSpanDays: 100, criticalCount: 0, rawMap: {} };
         }
 
         const taskMap = {};
@@ -540,7 +550,7 @@
           };
         });
 
-        // Forward Pass for standard tasks
+        // Forward Pass
         let changed = true;
         let passes = 0;
         while (changed && passes < 30) {
@@ -633,16 +643,17 @@
           n.isCritical = n.float === 0 && !n.done && n.itemType !== "Summary";
         });
 
+        // Ensure at least 100 days span to comfortably include late November Thanksgiving
         return {
           tasks: visibleNodes,
           anchorDate: earliestISO,
-          totalSpanDays: Math.max(30, Math.ceil(maxEF) + 6),
+          totalSpanDays: Math.max(105, Math.ceil(maxEF) + 21),
           criticalCount: visibleNodes.filter(n => n.isCritical).length,
           rawMap: taskMap
         };
       }, [visibleTasks, data.tasks]);
 
-      // Cross-Project Resource Loading Heatmap
+      // Resource Loading Heatmap
       const resourceLoadingMap = useMemo(() => {
         const loading = {};
         (data.resources || []).forEach(r => {
@@ -684,7 +695,7 @@
         return loading;
       }, [data.tasks, data.resources]);
 
-      // Timeline scale generator with Stat Holiday Mapping
+      // Robust Interval-Based Stat Holiday Scanning (Catches Thanksgiving and other dates inside any week/month)
       const timelineUnits = useMemo(() => {
         const totalDays = cpmSchedule.totalSpanDays;
         const anchor = cpmSchedule.anchorDate;
@@ -704,43 +715,52 @@
             };
           });
         } else if (ganttScale === "week") {
-          const numWeeks = Math.ceil(totalDays / 7) + 1;
+          const numWeeks = Math.ceil(totalDays / 7);
           return Array.from({ length: numWeeks }, (_, i) => {
             const startISO = addDaysISO(anchor, i * 7);
+            const endISO = addDaysISO(startISO, 6);
+            const holidaysInWeek = activeStatHolidays.filter(h => h.date >= startISO && h.date <= endISO);
             return {
               key: i,
               label: `W${i + 1}`,
               subLabel: formatShortDate(startISO),
               iso: startISO,
               widthPx: 64,
-              daysSpan: 7
+              isHoliday: holidaysInWeek.length > 0,
+              holidayName: holidaysInWeek.map(h => h.name).join(", ")
             };
           });
         } else if (ganttScale === "month") {
-          const numMonths = Math.ceil(totalDays / 30) + 2;
+          const numMonths = Math.ceil(totalDays / 30);
           return Array.from({ length: numMonths }, (_, i) => {
             const startISO = addDaysISO(anchor, i * 30);
+            const endISO = addDaysISO(startISO, 29);
             const d = parseISO(startISO);
+            const holidaysInMonth = activeStatHolidays.filter(h => h.date >= startISO && h.date <= endISO);
             return {
               key: i,
               label: d.toLocaleDateString("en-US", { month: "short", year: "2-digit" }),
               subLabel: `M${i + 1}`,
               iso: startISO,
               widthPx: 110,
-              daysSpan: 30
+              isHoliday: holidaysInMonth.length > 0,
+              holidayName: holidaysInMonth.map(h => h.name).join(", ")
             };
           });
         } else {
-          const numQuarters = Math.ceil(totalDays / 90) + 2;
+          const numQuarters = Math.ceil(totalDays / 90);
           return Array.from({ length: numQuarters }, (_, i) => {
             const startISO = addDaysISO(anchor, i * 90);
+            const endISO = addDaysISO(startISO, 89);
+            const holidaysInQ = activeStatHolidays.filter(h => h.date >= startISO && h.date <= endISO);
             return {
               key: i,
               label: `Q${Math.floor(i % 4) + 1} '26`,
               subLabel: formatShortDate(startISO),
               iso: startISO,
               widthPx: 160,
-              daysSpan: 90
+              isHoliday: holidaysInQ.length > 0,
+              holidayName: holidaysInQ.map(h => h.name).join(", ")
             };
           });
         }
@@ -766,7 +786,7 @@
         setData(prev => ({ ...prev, tasks: updated }));
       };
 
-      // Add Deliverable / Item
+      // Add Deliverable
       const handleAddItem = (e) => {
         e.preventDefault();
         if (!qaName.trim()) return;
@@ -775,7 +795,6 @@
         const parsedDur = isMilestone ? 0 : Math.max(0.01, parseFloat(qaDuration) || 1);
         const assignedRes = qaResource || (data.resources[0]?.name || "Lead");
 
-        // Compute project sequence prefix
         const prjIdx = data.projects.findIndex(p => p.id === targetPrjId);
         const pSeq = prjIdx >= 0 ? prjIdx + 1 : 1;
         const prjTasks = data.tasks.filter(t => t.projectId === targetPrjId);
@@ -911,7 +930,7 @@
         }));
       };
 
-      // Program / Project / Resource Handlers
+      // Full CRUD Submit Handler for Programs, Projects, Resources & Team Invites
       const handleProgramProjectSubmit = async (e) => {
         e.preventDefault();
 
@@ -989,6 +1008,13 @@
               projects: prev.projects.map(p => p.id === selectedEditProjectId ? {
                 ...p, code: editCode, name: editName, methodology: editMethodology
               } : p)
+            }));
+          } else if (manageType === "resource") {
+            setData(prev => ({
+              ...prev,
+              resources: prev.resources.map(r => r.id === selectedEditResourceId ? {
+                ...r, name: newResourceName, role: newResourceRole, isAgent: !!newResourceIsAgent
+              } : r)
             }));
           }
         }
@@ -1331,7 +1357,7 @@
                 ))}
               </div>
 
-              {/* Statutory Holidays Region Selector (CA, US, Both) */}
+              {/* Statutory Calendar Region Selector */}
               <div className="p-3 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 space-y-2">
                 <div className="text-[11px] font-semibold text-slate-700 dark:text-slate-300">Statutory Calendar</div>
                 <select
@@ -1339,9 +1365,9 @@
                   onChange={(e) => setHolidayRegion(e.target.value)}
                   className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-2 py-1.5 text-xs text-slate-800 dark:text-slate-200"
                 >
+                  <option value="BOTH">🌎 Cross-Border (CA + US)</option>
                   <option value="CA_AB">🇨🇦 Canadian / Alberta</option>
                   <option value="US">🇺🇸 US Federal</option>
-                  <option value="BOTH">🌎 Cross-Border (CA + US)</option>
                   <option value="NONE">Off / Hide Holidays</option>
                 </select>
                 <div className="text-[9px] text-slate-400">Highlights stat holidays in yellow/amber on the timeline.</div>
@@ -1489,7 +1515,6 @@
                         ) : (
                           groupedVisibleTasks.map((group) => (
                             <React.Fragment key={group.project.id}>
-                              {/* DISTINCT PROJECT SECTION HEADER BANNER */}
                               <tr className="bg-slate-100/90 dark:bg-slate-800/90 border-t-2 border-b border-slate-300 dark:border-slate-700">
                                 <td colSpan="13" className="px-4 py-2">
                                   <div className="flex items-center justify-between">
@@ -1677,7 +1702,7 @@
                 </div>
               )}
 
-              {/* CARD 2: Dedicated Full-Width Gantt Chart with SVG Arrows & Grouped Project Tracks */}
+              {/* CARD 2: Dedicated Full-Width Gantt Chart with SVG Arrows & Horizon Guarantee */}
               {activeTab === "gantt" && (
                 <div className="bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-sm">
                   <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-800 flex flex-wrap justify-between items-center gap-3 bg-slate-50/50 dark:bg-slate-900/50">
@@ -2458,7 +2483,7 @@
             </div>
           )}
 
-          {/* Manage Modal with Explicit Project & Program Selectors for Editing */}
+          {/* Manage Modal with Superior UX for Edit Active on Resources & Team Members */}
           {showManageModal && (
             <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
               <div className="bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-800 rounded-3xl p-6 w-full max-w-xl space-y-4 shadow-2xl">
@@ -2487,6 +2512,7 @@
                       setManageAction("edit");
                       if (manageType === "project") loadProjectForEdit(selectedEditProjectId || data.projects[0]?.id);
                       else if (manageType === "program") loadProgramForEdit(selectedEditProgramId || data.programs[0]?.id);
+                      else if (manageType === "resource") loadResourceForEdit(selectedEditResourceId || data.resources[0]?.id);
                     }}
                     className={`py-1.5 rounded-xl transition ${manageAction === "edit" ? "bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm" : "text-slate-500"}`}
                   >
@@ -2527,7 +2553,10 @@
                     </button>
                     <button
                       type="button"
-                      onClick={() => { setManageType("resource"); }}
+                      onClick={() => {
+                        setManageType("resource");
+                        if (manageAction === "edit" && data.resources.length > 0) loadResourceForEdit(selectedEditResourceId || data.resources[0].id);
+                      }}
                       className={`flex-1 py-1.5 rounded-xl text-xs font-bold transition ${manageType === "resource" ? "bg-slate-200 dark:bg-slate-700 text-slate-900 dark:text-white" : "text-slate-400"}`}
                     >
                       Resource / AI Agent
@@ -2537,14 +2566,14 @@
                       onClick={() => { setManageType("team"); }}
                       className={`flex-1 py-1.5 rounded-xl text-xs font-bold transition ${manageType === "team" ? "bg-slate-200 dark:bg-slate-700 text-slate-900 dark:text-white" : "text-slate-400"}`}
                     >
-                      ✉️ Team Invite
+                      {manageAction === "edit" ? "Team Access" : "✉️ Team Invite"}
                     </button>
                   </div>
                 )}
 
                 {manageAction !== "list" ? (
                   <form onSubmit={handleProgramProjectSubmit} className="space-y-3 pt-1">
-                    {/* Explicit Selector when in Edit Active mode so you can pick PRJ-01, PRJ-02, etc. */}
+                    {/* Project Selector when in Edit Active */}
                     {manageAction === "edit" && manageType === "project" && (
                       <div>
                         <label className="block text-[10px] font-bold uppercase text-brand-emerald mb-1">Select Project to Edit</label>
@@ -2560,6 +2589,7 @@
                       </div>
                     )}
 
+                    {/* Program Selector when in Edit Active */}
                     {manageAction === "edit" && manageType === "program" && (
                       <div>
                         <label className="block text-[10px] font-bold uppercase text-brand-emerald mb-1">Select Program to Edit</label>
@@ -2575,7 +2605,54 @@
                       </div>
                     )}
 
-                    {manageType === "team" ? (
+                    {/* Resource Selector when in Edit Active */}
+                    {manageAction === "edit" && manageType === "resource" && (
+                      <div>
+                        <label className="block text-[10px] font-bold uppercase text-brand-emerald mb-1">Select Resource / AI Agent to Edit</label>
+                        <select
+                          value={selectedEditResourceId}
+                          onChange={(e) => loadResourceForEdit(e.target.value)}
+                          className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-xs font-semibold text-slate-900 dark:text-white"
+                        >
+                          {data.resources.map(r => (
+                            <option key={r.id} value={r.id}>{r.isAgent ? "🤖 " : ""}{r.name} ({r.role})</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+
+                    {/* SUPERIOR UX FOR TEAM INVITE: In Edit Active, display and manage permissions table directly */}
+                    {manageType === "team" && manageAction === "edit" ? (
+                      <div className="space-y-3">
+                        <label className="block text-[10px] font-bold uppercase text-brand-emerald">
+                          Workspace Team Members & Role Permissions
+                        </label>
+                        <div className="space-y-1.5 max-h-56 overflow-y-auto">
+                          {(data.teamMembers || []).map(member => (
+                            <div key={member.id} className="flex items-center justify-between p-2.5 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 text-xs">
+                              <div>
+                                <div className="font-bold text-slate-900 dark:text-white">{member.email}</div>
+                                <div className="text-[10px] text-slate-500">Joined: {member.addedAt}</div>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <select
+                                  value={member.permission}
+                                  onChange={(e) => updateTeamPermission(member.id, e.target.value)}
+                                  className="bg-slate-200 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded px-2 py-0.5 text-[10px] font-semibold"
+                                >
+                                  <option value="Read-Write">Read-Write</option>
+                                  <option value="Read-Only">Read-Only</option>
+                                </select>
+                                <button type="button" onClick={() => deleteTeamMember(member.id)} className="text-slate-400 hover:text-rose-500 font-bold px-1.5">✕</button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                        <p className="text-[10px] text-slate-500">
+                          Permissions take effect on next login. To invite new users, switch to "+ Create / Invite".
+                        </p>
+                      </div>
+                    ) : manageType === "team" && manageAction === "create" ? (
                       <div className="space-y-3">
                         <div>
                           <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Team Member Email Address</label>
@@ -2703,6 +2780,7 @@
                               type="text"
                               value={editMethodology}
                               onChange={(e) => setEditMethodology(e.target.value)}
+                              placeholder="Hybrid Agile, Critical Path, Waterfall"
                               className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-xs"
                             />
                           </div>
@@ -2784,7 +2862,19 @@
                               <span className="font-bold text-slate-900 dark:text-white">{res.isAgent ? "🤖 " : ""}{res.name}</span>
                               <span className="text-[10px] text-slate-500 ml-2">({res.role})</span>
                             </div>
-                            <button onClick={() => deleteResource(res.id)} className="text-slate-400 hover:text-rose-500 font-bold px-2 py-1">✕</button>
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => {
+                                  setManageAction("edit");
+                                  setManageType("resource");
+                                  loadResourceForEdit(res.id);
+                                }}
+                                className="text-brand-emerald font-semibold hover:underline"
+                              >
+                                Edit
+                              </button>
+                              <button onClick={() => deleteResource(res.id)} className="text-slate-400 hover:text-rose-500 font-bold px-2 py-1">✕</button>
+                            </div>
                           </div>
                         ))}
                       </div>
